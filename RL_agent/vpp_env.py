@@ -146,10 +146,10 @@ class UrbanVPPEnv(gym.Env):
             ramp = self.bess_batt_ramp if is_bess else self.home_batt_ramp
             desired_power = action[i] * p_max # Convert normalized action [-1,1] → real power (kW)
                    
-            # --- CONSTRAINT 1: No Charging at Night (6pm - 11pm) ---
-            # Home batteries can't charge at night; BESS can charge anytime
+            # --- CONSTRAINT 1: No Charging During Evening Peak (6pm - 11pm) ---
+            # Prevent charging during expensive evening hours for all batteries
             if 18 <= hour <= 23:
-                if desired_power < 0 and node_idx != self.bess_index:
+                if desired_power < 0:
                     desired_power = 0.0
 
             # --- CONSTRAINT 2: SoC Limits (0.2 - 0.8 safe zone)
@@ -159,20 +159,14 @@ class UrbanVPPEnv(gym.Env):
             if self.soc[i] >= 0.8 and desired_power < 0:
                 desired_power = 0.0  # Prevent charging when battery full
 
-            # --- CONSTRAINT 3: Local solar surplus check (Home batteries only) ---
-            # Home batteries should only charge from local solar surplus
-            if desired_power < 0 and node_idx != self.bess_index:  # charging home battery
-                if home_solar_surplus[node_idx] <= 0:
-                    desired_power = 0.0
-
-            # --- CONSTRAINT 4: Demand-following discharge ---
-            # If net demand exists, prioritize discharge over charging
-            # But allow charging from local surplus (checked above)
-            if net_demand > 0 and desired_power < 0:
-                # Only block BESS charging when grid needs power
-                # Home batteries already checked local surplus above
-                if node_idx == self.bess_index:
-                    desired_power = 0.0
+            # --- CONSTRAINT 3: Prefer solar charging for home batteries (soft preference) ---
+            # Home batteries get a small penalty if charging without local surplus
+            # but are still allowed to charge from grid during cheap hours
+            # This is handled in the reward function, not as a hard constraint
+            
+            # --- CONSTRAINT 4: REMOVED - Allow flexible charging/discharging ---
+            # Batteries can charge or discharge based on economic signals
+            # Agent will learn optimal strategies through reward function
             
             # Limit discharge to actual remaining demand
             if desired_power > 0:
@@ -250,6 +244,17 @@ class UrbanVPPEnv(gym.Env):
             total_charge_power = np.sum(np.minimum(0, self.node_battery_power_kw))  # Negative value
             solar_charge_bonus = -3.0 * total_charge_power  # Convert to positive reward
 
+        # Bonus: Encourage afternoon charging (12pm-6pm) when solar is high
+        # This is the best time to charge from renewable energy
+        afternoon_charge_bonus = 0.0
+        if 12 <= hour < 18:
+            total_charge_power = np.sum(np.minimum(0, self.node_battery_power_kw))  # Negative value
+            # Higher bonus if solar is available, moderate bonus even without
+            if total_solar > 5.0:  # Good solar conditions
+                afternoon_charge_bonus = -5.0 * total_charge_power  # Strong incentive
+            else:
+                afternoon_charge_bonus = -2.0 * total_charge_power  # Moderate incentive
+
         # Bonus: Encourage discharge during night/evening when SoC allows
         night_discharge_bonus = 0.0
         if (hour < 6 or hour > 18) and np.mean(self.soc) > 0.3:
@@ -284,6 +289,7 @@ class UrbanVPPEnv(gym.Env):
                   - cost 
                   + voltage_penalty 
                   + solar_charge_bonus 
+                  + afternoon_charge_bonus
                   + night_discharge_bonus 
                   + cycling_cost)
 

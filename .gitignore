@@ -215,3 +215,5 @@ ppo_vpp_aggregator.zip
 data/
 vecnormalizer.pkl/
 RL_agent/vpp_env1.py
+Folder content.txt
+*.pkl

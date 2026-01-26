@@ -1,17 +1,21 @@
-Final_Year_Project/
-│
-├── data/
-│   ├── solar_forecast.csv   <-- From your forecasting friend
-│   └── load_forecast.csv
-│
-├── MATLAB_model/
-│   └── UrbanFeeder.m     <-- From your MATLAB friend
-│
-├── rl_agent/                <-- YOUR WORK
-│   ├── train.py             <-- Run this to train the agent
-│   ├── vpp_env.py           <-- The "Bridge" code I gave you
-│   ├── test_agent.py        <-- Run this to see the results
-│   ├── plot_results.py      <-- Run this to see the results in plots      
-│   └── ppo_vpp_model.zip    <-- The saved "Brain" (appears after training)
-│
-└── requirements.txt         <-- List of libraries (good for thesis report)
+# VPP Aggregator - RL Agent Requirements
+# Python 3.10+ recommended
+
+# Core RL Libraries
+gymnasium>=0.29.0
+stable-baselines3>=2.2.0
+tensorboard>=2.15.0
+
+# Numerical & Data Processing
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Optional but recommended
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# For plotting and analysis
+scipy>=1.10.0
+
+# Note: If you encounter issues with gymnasium, you may need:
+# pip install gymnasium[all]

@@ -214,3 +214,4 @@ data.zip
 ppo_vpp_aggregator.zip
 data/
 *.png
+vecnormalizer.pkl/

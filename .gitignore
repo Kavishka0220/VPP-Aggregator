@@ -205,3 +205,11 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Files and folders
+tensorboard_logs/
+checkpoints/
+
+data.zip
+ppo_vpp_aggregator.zip
+data/

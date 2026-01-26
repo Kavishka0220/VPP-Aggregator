@@ -1,0 +1,17 @@
+Final_Year_Project/
+│
+├── data/
+│   ├── solar_forecast.csv   <-- From your forecasting friend
+│   └── load_forecast.csv
+│
+├── MATLAB_model/
+│   └── UrbanFeeder.m     <-- From your MATLAB friend
+│
+├── rl_agent/                <-- YOUR WORK
+│   ├── train.py             <-- Run this to train the agent
+│   ├── vpp_env.py           <-- The "Bridge" code I gave you
+│   ├── test_agent.py        <-- Run this to see the results
+│   ├── plot_results.py      <-- Run this to see the results in plots      
+│   └── ppo_vpp_model.zip    <-- The saved "Brain" (appears after training)
+│
+└── requirements.txt         <-- List of libraries (good for thesis report)

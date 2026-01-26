@@ -1,0 +1,362 @@
+import gymnasium as gym
+from gymnasium import spaces
+import numpy as np
+import pandas as pd
+
+class UrbanVPPEnv(gym.Env):
+    """
+    Final Thesis VPP Environment
+    - Constraints: Voltage must be between 0.9 and 1.1 p.u.
+    - Inputs: Common Solar, 10 Loads, 6 PCC Voltages, 3 SoCs, Time.
+    """
+    
+    metadata = {'render_modes': []}
+    
+    def __init__(self, data_path="../data"):
+        super(UrbanVPPEnv, self).__init__()
+
+        # --- 1. SYSTEM CONFIGURATION ---
+        self.n_nodes = 11 # 0 to 9 (Houses) + 10 (BESS Node)
+        self.solar_indices = [0, 1, 2, 4, 6, 8] # Which nodes have Solar? (0, 1, 2, 4, 6, 8)
+        # Which nodes have Batteries?
+        self.home_batt_indices = [0, 2] # Home Batteries at 0 & 2
+        self.bess_index = 10 # BESS at 10
+        
+        # Map actions to physical nodes: Action[0]->Node0, Action[1]->Node2, Action[2]->Node6
+        self.storage_map = self.home_batt_indices + [self.bess_index]
+        self.n_storage_units = 3
+
+        # Specs
+        self.home_batt_cap = 13.5 # kWh
+        self.bess_cap = 100.0 # kWh
+        self.home_batt_power = 5.0 # kW
+        self.bess_power = 50.0 # kW
+
+        # --- Battery Ramp Rate Limits (kW per 15 min step) ---
+        self.home_batt_ramp = 2.0     # kW / step
+        self.bess_batt_ramp = 10.0    # kW / step
+
+        # --- 2. ACTION SPACE ---
+        self.action_space = spaces.Box(
+            low=-1.0, high=1.0, shape=(3,), dtype=np.float32
+        )
+
+        # --- 3. OBSERVATION SPACE ---
+        # 1(Solar) + 10(Loads) + 6(PCC Voltages) + 3(SoCs) + 4(Time) = 24
+        self.obs_size = 24
+        self.observation_space = spaces.Box(
+            #low=-np.inf, high=np.inf,
+            low=-5, high=5,
+            shape=(self.obs_size,), dtype=np.float32
+        )
+
+        # State Variables
+        self.state = None
+        self.current_step = 0
+        self.max_steps = 96
+        self.soc = np.ones(3) * 0.5 
+        self.prev_batt_power = np.zeros(3)
+        # We need 11 voltage values internally
+        self.voltages = np.ones(self.n_nodes, dtype=np.float32) # Store all voltages internally
+
+        # --- LOAD DATA ---
+        try:
+            # These files contain 10 columns (House 0 to House 9)
+            self.solar_df = pd.read_csv(f"{data_path}/solar_forecast_formatted.csv")
+            self.load_df = pd.read_csv(f"{data_path}/load_forecast.csv")
+            
+            # Validate data shape
+            if self.solar_df.shape[1] != 10 or self.load_df.shape[1] != 10:
+                raise ValueError(f"Data must have 10 columns. Got solar: {self.solar_df.shape[1]}, load: {self.load_df.shape[1]}")
+            if len(self.solar_df) < self.max_steps or len(self.load_df) < self.max_steps:
+                raise ValueError(f"Data must have at least {self.max_steps} rows. Got solar: {len(self.solar_df)}, load: {len(self.load_df)}")
+            
+            print("✅ Data Loaded Successfully!")
+        except FileNotFoundError:
+            # Fallback dummy data
+            print("⚠️ Warning: Using dummy random data")
+            self.solar_df = pd.DataFrame(np.random.rand(1000, 10) * 5.0)
+            self.load_df = pd.DataFrame(np.random.rand(1000, 10) * 3.0)    
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        
+        self.current_step = 0
+        self.soc = np.ones(3) * 0.5
+        self.prev_batt_power = np.zeros(self.n_storage_units)
+        self.voltages = np.ones(self.n_nodes, dtype=np.float32) # Reset voltages to 1.0
+        
+        # Pick random day or use provided start index
+        if options is not None and "start_step" in options:
+            self.start_idx = options["start_step"]
+            if "episode_len" in options:
+                self.max_steps = options["episode_len"]
+            print(f"🔧 Starting at step {self.start_idx}, length {self.max_steps}")
+        else:
+            max_start = len(self.solar_df) - self.max_steps
+            self.start_idx = np.random.randint(0, max_start)
+
+        # Slice Data
+        self.solar_episode = self.solar_df.iloc[self.start_idx : self.start_idx + self.max_steps].values
+        self.load_episode = self.load_df.iloc[self.start_idx : self.start_idx + self.max_steps].values
+        
+        # Apply Mask (Only keep solar for nodes with panels: 0,1,2,4,6,8)
+        # Even if CSV has data for all houses, we zero out houses without panels
+        self.solar_mask = np.zeros(10)
+        self.solar_mask[self.solar_indices] = 1.0
+        self.solar_episode = self.solar_episode * self.solar_mask
+
+        return self._get_obs(), {}
+    
+    def step(self, action):
+        # --- 1. GET DATA FIRST (Moved to top) ---
+        # We must know the Total Load/Solar BEFORE deciding battery actions
+        full_solar_profile = np.zeros(self.n_nodes) 
+        full_load_profile = np.zeros(self.n_nodes) 
+
+        # Fill with current step data
+        full_solar_profile[:10] = self.solar_episode[self.current_step]
+        full_load_profile[:10] = self.load_episode[self.current_step]
+
+        # Calculate Limits
+        total_load = np.sum(full_load_profile)
+        total_solar = np.sum(full_solar_profile)
+        
+        # Discharge Limit: Batteries fill the gap between Load and Solar.
+        # If Solar > Load, limit is 0 (No discharge allowed).
+        net_demand = max(0.0, total_load - total_solar)
+        net_solar_surplus = total_solar - total_load # Positive if surplus
+        home_solar_surplus = full_solar_profile - full_load_profile  # Per-house surplus
+        self.remaining_demand = net_demand # Decreases as we iterate batteries
+        
+        # --- 2. PHYSICS: APPLY ACTIONS ---
+        # Create an array of size 11 for the grid physics
+        self.node_battery_power_kw = np.zeros(self.n_nodes)
+        hour = (self.current_step % 96) / 4  # 15-min steps → hours
+        
+        for i, node_idx in enumerate(self.storage_map):
+            
+            is_bess = (node_idx == self.bess_index)
+
+            p_max = self.bess_power if is_bess else self.home_batt_power
+            cap = self.bess_cap if is_bess else self.home_batt_cap
+            ramp = self.bess_batt_ramp if is_bess else self.home_batt_ramp
+            desired_power = action[i] * p_max # Convert normalized action [-1,1] → real power (kW)
+                   
+            # --- CONSTRAINT 1: No Charging at Night (6pm - 11pm) ---
+            # Home batteries can't charge at night; BESS can charge anytime
+            if 18 <= hour <= 23:
+                if desired_power < 0 and node_idx != self.bess_index:
+                    desired_power = 0.0
+
+            # --- CONSTRAINT 2: SoC Limits (0.2 - 0.8 safe zone)
+            # Check this early to avoid other constraints with depleted batteries
+            if self.soc[i] <= 0.2 and desired_power > 0:
+                desired_power = 0.0  # Prevent discharge when battery low
+            if self.soc[i] >= 0.8 and desired_power < 0:
+                desired_power = 0.0  # Prevent charging when battery full
+
+            # --- CONSTRAINT 3: Local solar surplus check (Home batteries only) ---
+            # Home batteries should only charge from local solar surplus
+            if desired_power < 0 and node_idx != self.bess_index:  # charging home battery
+                if home_solar_surplus[node_idx] <= 0:
+                    desired_power = 0.0
+
+            # --- CONSTRAINT 4: Demand-following discharge ---
+            # If net demand exists, prioritize discharge over charging
+            # But allow charging from local surplus (checked above)
+            if net_demand > 0 and desired_power < 0:
+                # Only block BESS charging when grid needs power
+                # Home batteries already checked local surplus above
+                if node_idx == self.bess_index:
+                    desired_power = 0.0
+            
+            # Limit discharge to actual remaining demand
+            if desired_power > 0:
+                desired_power = min(desired_power, self.remaining_demand)
+                self.remaining_demand -= desired_power
+
+            # --- RAMP RATE LIMITING ---
+            # Prevent sudden power changes (use 'ramp' already calculated at line 157)
+            delta_p = desired_power - self.prev_batt_power[i]
+            delta_p = np.clip(delta_p, -ramp, ramp)
+            final_power = self.prev_batt_power[i] + delta_p
+            
+            # Ensure final power doesn't exceed physical limits
+            final_power = np.clip(final_power, -p_max, p_max)
+            
+            # Update SoC (0.25 hour = 15 min timestep)
+            eff = 0.95
+            if final_power >= 0:  # Discharging
+                # Battery loses energy: SoC decreases
+                # Efficiency loss means battery gives up more than grid receives
+                energy_lost = (final_power * 0.25) / eff
+                self.soc[i] -= energy_lost / cap
+            else:  # Charging (final_power < 0)
+                # Battery gains energy: SoC increases (but final_power is negative, so -= increases SoC)
+                # Efficiency loss means battery stores less than grid provides
+                energy_gained = final_power * 0.25 * eff  # Negative value
+                self.soc[i] -= energy_gained / cap  # -= negative = increase
+            
+            self.soc[i] = np.clip(self.soc[i], 0, 1)
+            
+            self.node_battery_power_kw[node_idx] = final_power
+            self.prev_batt_power[i] = final_power
+
+
+        # --- 3. PHYSICS: CALCULATE VOLTAGES ---
+        
+        # Calculate net power injection at ALL 11 nodes (Generation - Load + Battery)
+        self.net_injection = full_solar_profile + self.node_battery_power_kw - full_load_profile
+        
+        # Simple Impedance Model (V = V_grid + I*R)
+        # 1.0 is slack bus voltage
+        # alphas increases with distance (Node 10 is furthest)
+        alphas = np.linspace(0.005, 0.025, self.n_nodes)
+        
+        # Calculate voltage for ALL 11 nodes
+        raw_voltages = 1.0 + alphas * self.net_injection
+        # Save unclipped voltages for penalty calculation
+        voltages_for_penalty = raw_voltages.copy()
+        #self.voltages = np.clip(raw_voltages, 0.9, 1.1)
+        self.voltages = raw_voltages
+        
+        # --- 4. REWARD CALCULATION ---
+        # A. Economic Profit
+        # --- Time-of-Use Pricing ---
+        
+        if 6 <= hour < 18:         # Daytime / solar hours (6am-6pm)
+            buy_price, sell_price = 25, 19
+        elif 18 <= hour < 23:      # Evening peak (6pm-11pm)
+            buy_price, sell_price = 54, 19
+        else:                      # Night (11pm-6am)
+            buy_price, sell_price = 13, 19
+
+        # Grid economics based on net injection (solar + battery - load)
+        # Positive = export to grid (earn money), Negative = import from grid (pay money)
+        grid_export = np.maximum(0, self.net_injection)   # Power sold to grid
+        grid_import = np.maximum(0, -self.net_injection)  # Power bought from grid
+
+        revenue = np.sum(grid_export * sell_price)
+        cost = np.sum(grid_import * buy_price)
+
+        # Bonus: Encourage charging when solar surplus exists
+        # Charging power is negative, so negate to get positive reward
+        solar_charge_bonus = 0.0
+        if net_solar_surplus > 0:
+            total_charge_power = np.sum(np.minimum(0, self.node_battery_power_kw))  # Negative value
+            solar_charge_bonus = -3.0 * total_charge_power  # Convert to positive reward
+
+        # Bonus: Encourage discharge during night/evening when SoC allows
+        night_discharge_bonus = 0.0
+        if (hour < 6 or hour > 18) and np.mean(self.soc) > 0.3:
+            night_discharge_bonus = 0.5 * np.sum(np.maximum(0, self.node_battery_power_kw))
+
+        # B. Voltage Violation Penalty (0.9 to 1.1 p.u. limits)
+        # Monitor all nodes for grid safety compliance
+        critical_nodes = list(range(10)) + [self.bess_index]
+
+        pcc_voltages = voltages_for_penalty[critical_nodes]
+
+        # Calculate how far we are outside the safe zone
+        # Logic: max(0, V - 1.1) + max(0, 0.9 - V)
+        over_voltage = np.maximum(0, pcc_voltages - 1.1)
+        under_voltage = np.maximum(0, 0.9 - pcc_voltages)
+        
+        total_violation = np.sum(over_voltage + under_voltage)
+        
+        # Heavy Penalty: -100 per unit of violation
+        # Example: 0.01 p.u. deviation → -1 penalty
+        voltage_penalty = -100.0 * total_violation
+
+        # C. Battery Health & Smoothness
+        # Penalize rapid power changes to reduce battery stress
+        # Calculate actual power changes, not just action magnitude
+        power_changes = np.array([self.node_battery_power_kw[node_idx] - self.prev_batt_power[i] 
+                                  for i, node_idx in enumerate(self.storage_map)])
+        cycling_cost = -0.5 * np.sum(np.abs(power_changes)) 
+        
+        # D. Total Reward
+        reward = (revenue 
+                  - cost 
+                  + voltage_penalty 
+                  + solar_charge_bonus 
+                  + night_discharge_bonus 
+                  + cycling_cost)
+
+        # --- 4. NEXT STEP TRANSITION ---
+        self.current_step += 1
+        terminated = (self.current_step >= self.max_steps)
+        truncated = False
+        
+        obs = self._get_obs() if not terminated else self.state
+        #obs = self._get_obs()
+        
+        # Pass info for debugging
+        info = {
+            "hour": hour,
+            "net_demand": net_demand,
+            "remaining_demand": self.remaining_demand,
+            "max_voltage": np.max(pcc_voltages),
+            "min_voltage": np.min(pcc_voltages),
+            "violation": total_violation,
+            "solar_surplus": net_solar_surplus,
+            "total_load": total_load,
+            "total_solar": total_solar
+        }
+
+        return obs, float(reward), terminated, truncated, info
+
+    def _get_obs(self):
+        """Constructs the exact 24-value input vector for the RL agent.
+        
+        Observation Structure:
+        - [0]:     Common solar forecast (kW)
+        - [1-10]:  Load forecasts for Houses 0-9 (kW)
+        - [11-16]: Voltages at solar nodes [0,1,2,4,6,8] (p.u.)
+        - [17-19]: Battery SoCs [Home0, Home2, BESS] (0-1)
+        - [20-23]: Time features [sin(time), cos(time), sin(day), cos(day)]
+        """
+        
+        # 1. Common Solar Forecast (1 Value)
+        if self.current_step < self.max_steps:
+            # Use raw weather data from Node 0 as the 'signal'
+            common_solar = np.array([self.solar_episode[self.current_step][0]])
+            load_step = self.load_episode[self.current_step]
+        else:
+            # Safety: Return zeros if episode has ended
+            common_solar = np.array([0.0])
+            load_step = np.zeros(10)
+        
+        # 2. Load Forecasts (10 Values)
+        # Already extracted as load_step above
+        
+        # 3. Solar PCC Voltages (6 Values) - CRITICAL INPUT
+        # Only voltages at nodes with solar panels
+        pcc_voltages = self.voltages[self.solar_indices]
+
+        # 4. Battery States of Charge (3 Values)
+        # Already stored in self.soc
+        
+        # 5. Date & Time (4 Values)
+        # Circular encoding for smooth periodic representation
+        time_angle = (self.current_step / self.max_steps) * 2 * np.pi
+        day_angle = ((self.start_idx // 96) / 365.0) * 2 * np.pi
+        
+        date_time_feats = np.array([
+            np.sin(time_angle), np.cos(time_angle),
+            np.sin(day_angle),  np.cos(day_angle)
+        ])
+
+        # 6. Pack State Vector (Total: 24 values)
+        self.state = np.concatenate([
+            common_solar,    # 1
+            load_step,       # 10
+            pcc_voltages,    # 6 (The Agent sees these!)
+            self.soc,        # 3
+            date_time_feats  # 4
+        ]).astype(np.float32)
+        
+        return self.state
+    
+    

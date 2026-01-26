@@ -12,7 +12,7 @@ class UrbanVPPEnv(gym.Env):
     
     metadata = {'render_modes': []}
     
-    def __init__(self, data_path="../data"):
+    def __init__(self, data_path="./data"):
         super(UrbanVPPEnv, self).__init__()
 
         # --- 1. SYSTEM CONFIGURATION ---
@@ -94,7 +94,10 @@ class UrbanVPPEnv(gym.Env):
             print(f"🔧 Starting at step {self.start_idx}, length {self.max_steps}")
         else:
             max_start = len(self.solar_df) - self.max_steps
-            self.start_idx = np.random.randint(0, max_start)
+            if max_start > 0:
+                self.start_idx = np.random.randint(0, max_start)
+            else:
+                self.start_idx = 0  # Use all available data if it matches episode length
 
         # Slice Data
         self.solar_episode = self.solar_df.iloc[self.start_idx : self.start_idx + self.max_steps].values

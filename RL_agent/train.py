@@ -12,10 +12,10 @@ def main():
     # Safety: Create directories
     os.makedirs("./checkpoints/", exist_ok=True)
     os.makedirs("./tensorboard_logs/", exist_ok=True)
-    check_env(UrbanVPPEnv(), warn=True) # Check if the custom environment follows Gymnasium's interface
+    check_env(UrbanVPPEnv(data_path="./data"), warn=True) # Check if the custom environment follows Gymnasium's interface
     # 1. Create the Environment
     def make_env():
-        env = Monitor(UrbanVPPEnv())  # Monitor to log episode stats
+        env = Monitor(UrbanVPPEnv(data_path="./data"))  # Monitor to log episode stats
         #env = UrbanVPPEnv()
         return env
     

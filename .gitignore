@@ -217,3 +217,5 @@ vecnormalizer.pkl/
 RL_agent/vpp_env1.py
 Folder content.txt
 *.pkl
+eval_logs/evaluations.npz
+*.npz

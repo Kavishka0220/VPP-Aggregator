@@ -195,7 +195,8 @@ class UrbanVPPEnv(gym.Env):
                 energy_gained = final_power * 0.25 * eff  # Negative value
                 self.soc[i] -= energy_gained / cap  # -= negative = increase
             
-            self.soc[i] = np.clip(self.soc[i], 0, 1)
+            # Enforce strict SOC limits: 0.2 to 0.8 for battery health
+            self.soc[i] = np.clip(self.soc[i], 0.2, 0.8)
             
             self.node_battery_power_kw[node_idx] = final_power
             self.prev_batt_power[i] = final_power
@@ -244,6 +245,17 @@ class UrbanVPPEnv(gym.Env):
             total_charge_power = np.sum(np.minimum(0, self.node_battery_power_kw))  # Negative value
             solar_charge_bonus = -3.0 * total_charge_power  # Convert to positive reward
 
+        # Bonus: BESS Excess Solar Charging - Strongly encourage BESS to absorb community solar surplus
+        # BESS acts as the main buffer for community-wide excess solar generation
+        bess_solar_charge_bonus = 0.0
+        if net_solar_surplus > 0:
+            # Get BESS charging power (index 2 in storage_map = BESS at node 10)
+            bess_charge_power = np.minimum(0, self.node_battery_power_kw[self.bess_index])  # Negative if charging
+            # Strong incentive: BESS should prioritize absorbing excess solar
+            # Scale bonus with amount of solar surplus to encourage maximum absorption
+            surplus_factor = min(1.0, net_solar_surplus / 20.0)  # Normalize by typical surplus
+            bess_solar_charge_bonus = -10.0 * bess_charge_power * (1.0 + surplus_factor)  # Strong positive reward
+
         # Bonus: Encourage afternoon charging (12pm-6pm) when solar is high
         # This is the best time to charge from renewable energy
         afternoon_charge_bonus = 0.0
@@ -284,14 +296,31 @@ class UrbanVPPEnv(gym.Env):
                                   for i, node_idx in enumerate(self.storage_map)])
         cycling_cost = -0.5 * np.sum(np.abs(power_changes)) 
         
-        # D. Total Reward
+        # D. SOC Health Penalty - Encourage keeping SOC in 0.2-0.8 range
+        # This promotes battery longevity by avoiding deep discharge/overcharge
+        soc_health_penalty = 0.0
+        for i in range(len(self.soc)):
+            if self.soc[i] < 0.2:
+                # Penalty increases quadratically as SOC approaches 0
+                soc_health_penalty -= 50.0 * (0.2 - self.soc[i]) ** 2
+            elif self.soc[i] > 0.8:
+                # Penalty increases quadratically as SOC approaches 1
+                soc_health_penalty -= 50.0 * (self.soc[i] - 0.8) ** 2
+        
+        # E. Total Reward
         reward = (revenue 
                   - cost 
                   + voltage_penalty 
-                  + solar_charge_bonus 
+                  + solar_charge_bonus
+                  + bess_solar_charge_bonus
                   + afternoon_charge_bonus
                   + night_discharge_bonus 
-                  + cycling_cost)
+                  + cycling_cost
+                  + soc_health_penalty)
+        
+        # Reward normalization - scale down to help with learning stability
+        # Typical rewards are in range [-100, 100], normalize to reasonable range
+        reward = reward / 10.0
 
         # --- 4. NEXT STEP TRANSITION ---
         self.current_step += 1
@@ -301,7 +330,7 @@ class UrbanVPPEnv(gym.Env):
         obs = self._get_obs() if not terminated else self.state
         #obs = self._get_obs()
         
-        # Pass info for debugging
+        # Pass info for debugging and monitoring
         info = {
             "hour": hour,
             "net_demand": net_demand,
@@ -311,7 +340,15 @@ class UrbanVPPEnv(gym.Env):
             "violation": total_violation,
             "solar_surplus": net_solar_surplus,
             "total_load": total_load,
-            "total_solar": total_solar
+            "total_solar": total_solar,
+            "revenue": revenue,
+            "cost": cost,
+            "profit": revenue - cost,
+            "soc_home0": self.soc[0],
+            "soc_home2": self.soc[1],
+            "soc_bess": self.soc[2],
+            "bess_power": self.node_battery_power_kw[self.bess_index],
+            "voltage_penalty": voltage_penalty
         }
 
         return obs, float(reward), terminated, truncated, info

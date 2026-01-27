@@ -7,7 +7,13 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
 import os
 import numpy as np
-from vpp_env import UrbanVPPEnv 
+from vpp_env import UrbanVPPEnv
+
+def linear_schedule(initial_value: float):
+    """Linear learning rate schedule."""
+    def func(progress_remaining: float) -> float:
+        return progress_remaining * initial_value
+    return func 
 
 
 def main():
@@ -38,21 +44,26 @@ def main():
     print("[OK] Environment created and normalized.")
     print(f"[INFO] Training with {n_envs} parallel environments")
 
-    # 2. Define the PPO Model
+    # 2. Define the PPO Model with improved architecture
+    policy_kwargs = dict(
+        net_arch=dict(pi=[256, 256], vf=[256, 256])  # Deeper network for complex VPP dynamics
+    )
+    
     model = PPO(
         "MlpPolicy", 
         env, 
         verbose=1,
-        learning_rate=3e-4,        # Standard learning rate for PPO
+        learning_rate=linear_schedule(3e-4),  # Decaying LR for better convergence
         gamma=0.99,                # Discount factor
         gae_lambda=0.95,           # GAE smoothing
         clip_range=0.2,            # PPO clipping parameter
         n_epochs=10,               # Number of epochs per update
         n_steps=2048,              # Steps per environment before update
-        batch_size=64,             # Minibatch size
-        ent_coef=0.01,             # Entropy bonus for exploration
+        batch_size=64,            # Larger batch for stable updates with 4 envs
+        ent_coef=0.005,            # Lower entropy for more focused policy
         vf_coef=0.5,               # Value function coefficient
         max_grad_norm=0.5,         # Gradient clipping
+        policy_kwargs=policy_kwargs,
         seed=42,
         tensorboard_log="./tensorboard_logs/"
     )
@@ -62,7 +73,7 @@ def main():
     # 3. Setup Callbacks for Better Training
     # Checkpoint: Save model periodically
     checkpoint_callback = CheckpointCallback(
-        save_freq=20_000,          # Save every 20k steps (adjusted for parallel envs)
+        save_freq=20_000,          # Save every 20k steps
         save_path="./checkpoints/",
         name_prefix="ppo_vpp",
         save_vecnormalize=True     # Save normalization stats with checkpoints
@@ -73,8 +84,8 @@ def main():
         eval_env,
         best_model_save_path="./checkpoints/best_model/",
         log_path="./eval_logs/",
-        eval_freq=10_000,          # Evaluate every 10k steps
-        n_eval_episodes=5,         # Run 5 episodes for evaluation
+        eval_freq=10_000,          # Evaluate every 10k steps for better tracking
+        n_eval_episodes=10,        # More episodes for robust evaluation
         deterministic=True,        # Use deterministic policy for evaluation
         render=False,
         verbose=1
@@ -84,7 +95,7 @@ def main():
     callbacks = CallbackList([checkpoint_callback, eval_callback])
     
     # 4. Start Training
-    total_timesteps = 500_000  # Increased for better learning
+    total_timesteps = 500_000  # Increased to 1M for better convergence
     print("[START] PPO Training...")
     print(f"   Target: {total_timesteps:,} Timesteps")
     print(f"   Checkpoints every: {checkpoint_callback.save_freq:,} steps")

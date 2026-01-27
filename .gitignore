@@ -219,3 +219,4 @@ Folder content.txt
 *.pkl
 eval_logs/evaluations.npz
 *.npz
+*.npz

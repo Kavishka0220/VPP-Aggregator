@@ -17,6 +17,12 @@ def linear_schedule(initial_value: float):
 
 
 def main():
+    # === TRAINING CONFIGURATION ===
+    # Customize episode timing: start_hour controls when each episode begins
+    # None = random start (default), or specify hour (0-23) for consistent training
+    start_hour = None  # e.g., 11 for 11am, None for random
+    episode_length = 96  # Number of steps (96 = 24 hours)
+    
     # Safety: Create directories
     os.makedirs("./checkpoints/", exist_ok=True)
     os.makedirs("./tensorboard_logs/", exist_ok=True)
@@ -27,18 +33,50 @@ def main():
     
     # 1. Create Training Environments (Multiple for parallel training)
     n_envs = 4  # Use 4 parallel environments for faster training
+    
+    # Calculate start_step from start_hour if specified
+    start_step = start_hour * 4 if start_hour is not None else None
+    
     def make_env():
         def _init():
-            env = Monitor(UrbanVPPEnv(data_path="./data"))
+            env = UrbanVPPEnv(data_path="./data")
+            env = Monitor(env)
             return env
         return _init
     
+    # Custom wrapper class for timed episodes (defined at module level for pickling)
+    class TimedResetWrapper(gym.Wrapper):
+        def __init__(self, env, start_step_val, episode_len_val):
+            super().__init__(env)
+            self.start_step_val = start_step_val
+            self.episode_len_val = episode_len_val
+        
+        def reset(self, **kwargs):
+            if 'options' not in kwargs:
+                kwargs['options'] = {}
+            kwargs['options']['start_step'] = self.start_step_val
+            kwargs['options']['episode_len'] = self.episode_len_val
+            return self.env.reset(**kwargs)
+    
+    # Apply wrapper if start_step is specified
+    if start_step is not None:
+        def make_env_timed():
+            def _init():
+                env = UrbanVPPEnv(data_path="./data")
+                env = TimedResetWrapper(env, start_step, episode_length)
+                env = Monitor(env)
+                return env
+            return _init
+        env_factory = make_env_timed
+    else:
+        env_factory = make_env
+    
     # Use SubprocVecEnv for true parallel execution (faster on multi-core CPUs)
-    env = SubprocVecEnv([make_env() for _ in range(n_envs)])
+    env = SubprocVecEnv([env_factory() for _ in range(n_envs)])
     env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=5.0, clip_reward=10.0)
     
     # 2. Create Evaluation Environment (Separate to track actual performance)
-    eval_env = DummyVecEnv([make_env()])
+    eval_env = DummyVecEnv([env_factory()])
     eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=False, clip_obs=5.0, training=False)
     
     print("[OK] Environment created and normalized.")
@@ -95,7 +133,7 @@ def main():
     callbacks = CallbackList([checkpoint_callback, eval_callback])
     
     # 4. Start Training
-    total_timesteps = 500_000  # Increased to 1M for better convergence
+    total_timesteps = 500_000  # Increased to 0.5M for better convergence
     print("[START] PPO Training...")
     print(f"   Target: {total_timesteps:,} Timesteps")
     print(f"   Checkpoints every: {checkpoint_callback.save_freq:,} steps")

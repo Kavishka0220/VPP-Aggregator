@@ -71,10 +71,10 @@ class UrbanVPPEnv(gym.Env):
             if len(self.solar_df) < self.max_steps or len(self.load_df) < self.max_steps:
                 raise ValueError(f"Data must have at least {self.max_steps} rows. Got solar: {len(self.solar_df)}, load: {len(self.load_df)}")
             
-            print("✅ Data Loaded Successfully!")
+            print("[OK] Data Loaded Successfully!")
         except FileNotFoundError:
             # Fallback dummy data
-            print("⚠️ Warning: Using dummy random data")
+            print("[WARNING] Using dummy random data")
             self.solar_df = pd.DataFrame(np.random.rand(1000, 10) * 5.0)
             self.load_df = pd.DataFrame(np.random.rand(1000, 10) * 3.0)    
 
@@ -82,7 +82,9 @@ class UrbanVPPEnv(gym.Env):
         super().reset(seed=seed)
         
         self.current_step = 0
-        self.soc = np.ones(3) * 0.5
+        # Initialize SoC randomly within safe operating range (0.3 to 0.7) for robustness
+        # This simulates realistic starting conditions and improves training generalization
+        self.soc = np.random.uniform(0.3, 0.7, size=3)
         self.prev_batt_power = np.zeros(self.n_storage_units)
         self.voltages = np.ones(self.n_nodes, dtype=np.float32) # Reset voltages to 1.0
         
@@ -91,7 +93,7 @@ class UrbanVPPEnv(gym.Env):
             self.start_idx = options["start_step"]
             if "episode_len" in options:
                 self.max_steps = options["episode_len"]
-            print(f"🔧 Starting at step {self.start_idx}, length {self.max_steps}")
+            print(f"[CONFIG] Starting at step {self.start_idx}, length {self.max_steps}")
         else:
             max_start = len(self.solar_df) - self.max_steps
             if max_start > 0:

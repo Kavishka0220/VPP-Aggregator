@@ -139,6 +139,9 @@ class UrbanVPPEnv(gym.Env):
         self.node_battery_power_kw = np.zeros(self.n_nodes)
         hour = (self.current_step % 96) / 4  # 15-min steps → hours
         
+        # Store previous battery power for cycling cost calculation
+        prev_batt_power_copy = self.prev_batt_power.copy()
+        
         for i, node_idx in enumerate(self.storage_map):
             
             is_bess = (node_idx == self.bess_index)
@@ -293,9 +296,10 @@ class UrbanVPPEnv(gym.Env):
 
         # C. Battery Health & Smoothness
         # Penalize rapid power changes to reduce battery stress
-        # Calculate actual power changes, not just action magnitude
-        power_changes = np.array([self.node_battery_power_kw[node_idx] - self.prev_batt_power[i] 
-                                  for i, node_idx in enumerate(self.storage_map)])
+        # Calculate actual power changes using stored previous values
+        final_power_array = np.array([self.node_battery_power_kw[node_idx] 
+                                      for node_idx in self.storage_map])
+        power_changes = final_power_array - prev_batt_power_copy
         cycling_cost = -0.5 * np.sum(np.abs(power_changes)) 
         
         # D. SOC Health Penalty - Encourage keeping SOC in 0.2-0.8 range

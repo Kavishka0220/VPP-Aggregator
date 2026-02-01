@@ -1,0 +1,43 @@
+clear
+set defaultbasefrequency=50
+
+! -----------------------------
+! CREATE CIRCUIT (MANDATORY)
+! -----------------------------
+new circuit.LV_Test
+~ basekv=0.4
+~ pu=1.0
+~ phases=3
+~ bus1=SourceBus
+
+! -----------------------------
+! SOURCE
+! -----------------------------
+new vsource.Source
+~ bus1=SourceBus
+~ basekv=0.4
+~ pu=1.0
+~ phases=3
+
+! -----------------------------
+! LINE
+! -----------------------------
+new line.Line1
+~ bus1=SourceBus.1.2.3
+~ bus2=Bus1.1.2.3
+~ length=0.05
+~ units=km
+~ r1=0.642
+~ x1=0.083
+
+! -----------------------------
+! LOAD
+! -----------------------------
+new load.Load1
+~ bus1=Bus1.1.2.3
+~ phases=3
+~ kv=0.4
+~ kw=10
+~ kvar=2
+
+solve

@@ -13,7 +13,9 @@ new circuit.LV_Test
 ! -----------------------------
 ! SOURCE
 ! -----------------------------
-new vsource.Source
+! The circuit definition above already creates 'Vsource.Source'. 
+! We use 'edit' to modify it if needed, instead of 'new'.
+edit vsource.Source
 ~ bus1=SourceBus
 ~ basekv=0.4
 ~ pu=1.0

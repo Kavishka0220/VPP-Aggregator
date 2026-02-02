@@ -1,0 +1,53 @@
+clear
+set defaultbasefrequency=50
+
+! ========= CIRCUIT =========
+new circuit.VPP11 basekv=0.4 pu=1.0 phases=3 bus1=SourceBus
+edit vsource.Source bus1=SourceBus basekv=0.4 pu=1.0 phases=3
+
+! ========= LINE MODEL (simple LV) =========
+new linecode.LVCode nphases=3 r1=0.642 x1=0.083 r0=1.5 x0=0.3 units=km
+
+! ========= FEEDER TOPOLOGY =========
+! Source -> N0 -> N1 -> ... -> N9 -> NBESS
+new line.L0  bus1=SourceBus.1.2.3 bus2=N0.1.2.3    linecode=LVCode length=0.02 units=km
+new line.L1  bus1=N0.1.2.3        bus2=N1.1.2.3    linecode=LVCode length=0.02 units=km
+new line.L2  bus1=N1.1.2.3        bus2=N2.1.2.3    linecode=LVCode length=0.02 units=km
+new line.L3  bus1=N2.1.2.3        bus2=N3.1.2.3    linecode=LVCode length=0.02 units=km
+new line.L4  bus1=N3.1.2.3        bus2=N4.1.2.3    linecode=LVCode length=0.02 units=km
+new line.L5  bus1=N4.1.2.3        bus2=N5.1.2.3    linecode=LVCode length=0.02 units=km
+new line.L6  bus1=N5.1.2.3        bus2=N6.1.2.3    linecode=LVCode length=0.02 units=km
+new line.L7  bus1=N6.1.2.3        bus2=N7.1.2.3    linecode=LVCode length=0.02 units=km
+new line.L8  bus1=N7.1.2.3        bus2=N8.1.2.3    linecode=LVCode length=0.02 units=km
+new line.L9  bus1=N8.1.2.3        bus2=N9.1.2.3    linecode=LVCode length=0.02 units=km
+new line.L10 bus1=N9.1.2.3        bus2=NBESS.1.2.3 linecode=LVCode length=0.02 units=km
+
+! ========= LOADS (placeholders; you will edit kw/kvar from Python each step) =========
+new load.Load0 bus1=N0.1.2.3 phases=3 kv=0.4 kw=5 kvar=1
+new load.Load1 bus1=N1.1.2.3 phases=3 kv=0.4 kw=5 kvar=1
+new load.Load2 bus1=N2.1.2.3 phases=3 kv=0.4 kw=5 kvar=1
+new load.Load3 bus1=N3.1.2.3 phases=3 kv=0.4 kw=5 kvar=1
+new load.Load4 bus1=N4.1.2.3 phases=3 kv=0.4 kw=5 kvar=1
+new load.Load5 bus1=N5.1.2.3 phases=3 kv=0.4 kw=5 kvar=1
+new load.Load6 bus1=N6.1.2.3 phases=3 kv=0.4 kw=5 kvar=1
+new load.Load7 bus1=N7.1.2.3 phases=3 kv=0.4 kw=5 kvar=1
+new load.Load8 bus1=N8.1.2.3 phases=3 kv=0.4 kw=5 kvar=1
+new load.Load9 bus1=N9.1.2.3 phases=3 kv=0.4 kw=5 kvar=1
+
+! ========= PV (solar_indices = [0,1,2,4,6,8]) =========
+new generator.PV0 bus1=N0.1.2.3 phases=3 kv=0.4 kw=0 model=1
+new generator.PV1 bus1=N1.1.2.3 phases=3 kv=0.4 kw=0 model=1
+new generator.PV2 bus1=N2.1.2.3 phases=3 kv=0.4 kw=0 model=1
+new generator.PV4 bus1=N4.1.2.3 phases=3 kv=0.4 kw=0 model=1
+new generator.PV6 bus1=N6.1.2.3 phases=3 kv=0.4 kw=0 model=1
+new generator.PV8 bus1=N8.1.2.3 phases=3 kv=0.4 kw=0 model=1
+
+! ========= STORAGE (home_batt_indices = [0,2], bess_index = 10) =========
+! We will control their kW from Python via "edit storage..."
+new storage.Batt0 bus1=N0.1.2.3 phases=3 kv=0.4 kwrated=5  kwh=10 %stored=50 state=idl
+new storage.Batt2 bus1=N2.1.2.3 phases=3 kv=0.4 kwrated=5  kwh=10 %stored=50 state=idl
+new storage.BESS  bus1=NBESS.1.2.3 phases=3 kv=0.4 kwrated=20 kwh=50 %stored=50 state=idl
+
+set voltagebases=[0.4]
+calcvoltagebases
+solve

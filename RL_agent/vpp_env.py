@@ -2,6 +2,16 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import pandas as pd
+import sys
+import os
+
+# Add parent directory to path to find openDSS module
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
+from openDSS.run_opendss import VPPDSSRunner
 
 class UrbanVPPEnv(gym.Env):
     """
@@ -14,6 +24,10 @@ class UrbanVPPEnv(gym.Env):
     
     def __init__(self, data_path="./data"):
         super(UrbanVPPEnv, self).__init__()
+
+        # Initialize OpenDSS Runner
+        dss_file = os.path.join(parent_dir, "openDSS", "feeder_houses.dss")
+        self.dss_runner = VPPDSSRunner(dss_file)
 
         # --- 1. SYSTEM CONFIGURATION ---
         self.n_nodes = 11 # 0 to 9 (Houses) + 10 (BESS Node)
@@ -84,7 +98,8 @@ class UrbanVPPEnv(gym.Env):
         self.current_step = 0
         # Initialize SoC randomly within safe operating range (0.3 to 0.7) for robustness
         # This simulates realistic starting conditions and improves training generalization
-        self.soc = np.random.uniform(0.3, 0.7, size=3)
+        #self.soc = np.random.uniform(0.3, 0.7, size=3)
+        self.soc = np.full(3, 0.2)
         self.prev_batt_power = np.zeros(self.n_storage_units)
         self.voltages = np.ones(self.n_nodes, dtype=np.float32) # Reset voltages to 1.0
         
@@ -201,22 +216,41 @@ class UrbanVPPEnv(gym.Env):
             self.prev_batt_power[i] = final_power
 
 
-        # --- 3. PHYSICS: CALCULATE VOLTAGES ---
+        # --- 3. PHYSICS: CALCULATE VOLTAGES (OpenDSS) ---
         
         # Calculate net power injection at ALL 11 nodes (Generation - Load + Battery)
         self.net_injection = full_solar_profile + self.node_battery_power_kw - full_load_profile
+
+        # Prepare inputs for OpenDSS
+        loads_kw = full_load_profile[:10].tolist()
+        pv_kw = {idx: full_solar_profile[idx] for idx in self.solar_indices}
         
-        # Simple Impedance Model (V = V_grid + I*R)
-        # 1.0 is slack bus voltage
-        # alphas increases with distance (Node 10 is furthest)
-        alphas = np.linspace(0.005, 0.025, self.n_nodes)
+        batt0 = self.node_battery_power_kw[0]
+        batt2 = self.node_battery_power_kw[2]
+        bess = self.node_battery_power_kw[10]
         
-        # Calculate voltage for ALL 11 nodes
-        raw_voltages = 1.0 + alphas * self.net_injection
-        # Save unclipped voltages for penalty calculation
-        voltages_for_penalty = raw_voltages.copy()
-        #self.voltages = np.clip(raw_voltages, 0.9, 1.1)
-        self.voltages = raw_voltages
+        # Run OpenDSS Step
+        step_res = self.dss_runner.step(
+            loads_kw=loads_kw,
+            pv_kw=pv_kw,
+            batt_home0_kw=batt0,
+            batt_home2_kw=batt2,
+            bess_kw=bess
+        )
+        
+        # Map OpenDSS voltages to self.voltages (indices 0-10)
+        name_to_idx = {f"N{i}": i for i in range(10)}
+        name_to_idx["NBESS"] = 10
+        
+        new_voltages = np.ones(self.n_nodes, dtype=np.float32)
+        for bus_name, v_pu in zip(step_res.buses, step_res.vmag_pu):
+            bus_name_upper = bus_name.upper()
+            if bus_name_upper in name_to_idx:
+                idx = name_to_idx[bus_name_upper]
+                new_voltages[idx] = v_pu
+        
+        self.voltages = new_voltages
+        voltages_for_penalty = self.voltages.copy()
         
         # --- 4. REWARD CALCULATION ---
         # A. Economic Profit

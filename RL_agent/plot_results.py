@@ -1,6 +1,7 @@
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from vpp_env import UrbanVPPEnv
@@ -13,9 +14,9 @@ plt.rcParams['figure.dpi'] = 150
 plt.rcParams['font.size'] = 6
 
 # --- CONFIGURATION ---
-MODEL_PATH = "./checkpoints/best_model/best_model"  # Use best model
-STATS_PATH = "./checkpoints/best_model/vecnormalize.pkl"  # Normalization stats
-OUTPUT_DIR = "./results_plots"  # Where to save plots
+MODEL_PATH = os.path.abspath("./checkpoints/best_model/best_model")  # Use best model
+STATS_PATH = os.path.abspath("./checkpoints/best_model/vecnormalize.pkl")  # Normalization stats
+OUTPUT_DIR = os.path.abspath("./results_plots")  # Where to save plots
 
 steps_to_plot = 96  # One day (15 min intervals)
 
@@ -326,6 +327,30 @@ plt.subplots_adjust(left=0.06, bottom=0.08, right=0.97, top=0.95, hspace=0.2)
 output_file_4 = f"{OUTPUT_DIR}/3_rewards.png"
 plt.savefig(output_file_4, dpi=300, bbox_inches='tight')
 print(f"[OK] Saved '{output_file_4}'")
+
+# ==========================================
+# EXPORT DATA
+# ==========================================
+print("[INFO] Exporting Simulation Data to CSV...")
+results_df = pd.DataFrame({
+    "Time_Hour": time_axis,
+    "Solar_kW": history["solar"],
+    "Load_kW": history["load"],
+    "BESS_Power_kW": history["bess_power"],
+    "HB1_Power_kW": history["hb1_power"],
+    "HB2_Power_kW": history["hb2_power"],
+    "BESS_SoC": history["soc_bess"],
+    "HB1_SoC": history["soc_hb1"],
+    "HB2_SoC": history["soc_hb2"],
+    "Net_Grid_Power_kW": history["net_power"],
+    "Grid_Export_kW": history["grid_export"],
+    "Grid_Import_kW": history["grid_import"],
+    "Instant_Reward": history["rewards"]
+})
+
+csv_file_path = f"{OUTPUT_DIR}/detailed_simulation_results.csv"
+results_df.to_csv(csv_file_path, index=False)
+print(f"[OK] Saved detailed results to '{csv_file_path}'")
 
 print("\n" + "="*50)
 print("All plots saved successfully!")

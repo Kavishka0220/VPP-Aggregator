@@ -24,9 +24,21 @@ def main():
     episode_length = 96  # Number of steps (96 = 24 hours)
 
     # === SCENARIO SELECTION ===
+    # Available Scenarios:
+    #   "cloudy_reduced_solar"          : Solar reduced with variability
+    #   "daytime_peak_load_day"         : Extra midday load bump
+    #   "evening_peak_load_day"         : Extra evening load bump
+    #   "heatwave_day"                  : Higher daytime load + reduced solar
+    #   "intermittent_solar_dropouts"   : Random solar dropouts
+    #   "load_higher_day"               : All loads scaled up
+    #   "night_blackout_window"         : Load dip 00:00-02:00
+    #   "solar_shifted_late"            : Solar delayed (morning clouds)
+    #   "solar_unavailable_day"         : Solar set to 0 all day
+    #   "weekend_low_load"              : All loads scaled down
+
     # Set to a scenario name (e.g., "heatwave_day") to train on that specific scenario.
     # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
-    scenario_name = None  # Example: "heatwave_day", "weekend_low_load", etc.
+    scenario_name = None
     
     # Safety: Create directories
     os.makedirs("./checkpoints/", exist_ok=True)
@@ -86,6 +98,7 @@ def main():
     
     print("[OK] Environment created and normalized.")
     print(f"[INFO] Training with {n_envs} parallel environments")
+    print(f"[INFO] Scenario: {scenario_name}")
 
     # 2. Define the PPO Model with improved architecture
     policy_kwargs = dict(

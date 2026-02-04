@@ -22,7 +22,7 @@ class UrbanVPPEnv(gym.Env):
     
     metadata = {'render_modes': []}
     
-    def __init__(self, data_path="./data"):
+    def __init__(self, data_path="./data", scenario_name=None):
         super(UrbanVPPEnv, self).__init__()
 
         # Initialize OpenDSS Runner
@@ -75,17 +75,56 @@ class UrbanVPPEnv(gym.Env):
 
         # --- LOAD DATA ---
         try:
-            # These files contain 10 columns (House 0 to House 9)
-            self.solar_df = pd.read_csv(f"{data_path}/solar_forecast_formatted.csv")
-            self.load_df = pd.read_csv(f"{data_path}/load_forecast.csv")
+            if scenario_name:
+                scenario_folder = os.path.join(data_path, "forecast_scenarios")
+                print(f"[INFO] Loading Scenario: {scenario_name}")
+                self.solar_df = pd.read_csv(f"{scenario_folder}/solar_{scenario_name}.csv")
+                self.load_df = pd.read_csv(f"{scenario_folder}/load_{scenario_name}.csv")
+            else:
+                # These files contain 10 columns (House 0 to House 9)
+                self.solar_df = pd.read_csv(f"{data_path}/solar_forecast_formatted.csv")
+                self.load_df = pd.read_csv(f"{data_path}/load_forecast.csv")
             
             # Validate data shape
             if self.solar_df.shape[1] != 10 or self.load_df.shape[1] != 10:
                 raise ValueError(f"Data must have 10 columns. Got solar: {self.solar_df.shape[1]}, load: {self.load_df.shape[1]}")
-            if len(self.solar_df) < self.max_steps or len(self.load_df) < self.max_steps:
-                raise ValueError(f"Data must have at least {self.max_steps} rows. Got solar: {len(self.solar_df)}, load: {len(self.load_df)}")
             
-            print("[OK] Data Loaded Successfully!")
+            # Handle potential length mismatch (e.g., Load is 1 day, Solar is 1 year)
+            len_solar = len(self.solar_df)
+            len_load = len(self.load_df)
+            
+            if len_solar != len_load:
+                print(f"[WARNING] Data length mismatch. Solar: {len_solar}, Load: {len_load}")
+                
+                # If Load is just 1 day (96 steps) and Solar is many days
+                if len_load == 96 and len_solar > 96:
+                    print(f"[INFO] Repeating Load profile to match Solar data length.")
+                    dataset_days = int(np.ceil(len_solar / 96))
+                    self.load_df = pd.concat([self.load_df] * dataset_days, ignore_index=True)
+                    self.load_df = self.load_df.iloc[:len_solar] # Trim to exact match
+                
+                # If Solar is just 1 day and Load is many days
+                elif len_solar == 96 and len_load > 96:
+                     print(f"[INFO] Repeating Solar profile to match Load data length.")
+                     dataset_days = int(np.ceil(len_load / 96))
+                     self.solar_df = pd.concat([self.solar_df] * dataset_days, ignore_index=True)
+                     self.solar_df = self.solar_df.iloc[:len_load]
+                
+                # Update lengths
+                len_solar = len(self.solar_df)
+                len_load = len(self.load_df)
+                
+                # If still mismatched (e.g. random lengths), trim to minimum
+                if len_solar != len_load:
+                     min_len = min(len_solar, len_load)
+                     print(f"[WARNING] Trimming to minimum common length: {min_len}")
+                     self.solar_df = self.solar_df.iloc[:min_len]
+                     self.load_df = self.load_df.iloc[:min_len]
+            
+            if len(self.solar_df) < self.max_steps:
+                raise ValueError(f"Data must have at least {self.max_steps} rows. Got: {len(self.solar_df)}")
+            
+            print(f"[OK] Data Loaded Successfully! Final Length: {len(self.solar_df)}")
         except FileNotFoundError:
             # Fallback dummy data
             print("[WARNING] Using dummy random data")

@@ -1,9 +1,14 @@
 import pandas as pd
 import numpy as np
+import os
 
 # 1. Load the raw weather data
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# Navigate up two levels from RL_agent/setup_scripts to get to project root, then into data
+csv_path = os.path.join(script_dir, '..', '..', 'data', 'solar_forecast.csv')
+
 # Add the slash after the dots
-df = pd.read_csv('../data/solar_forecast.csv') # Make sure this path is correct
+df = pd.read_csv(csv_path) # Make sure this path is correct
 
 # 2. Convert 'datetime' to actual time format and set as index
 df['datetime'] = pd.to_datetime(df['datetime'])
@@ -36,6 +41,7 @@ for i in range(1, 11):
     solar_data[col_name] = solar_data[col_name].clip(lower=0)
 
 # 5. Save to the file your Agent expects
-solar_data.to_csv('../data/solar_forecast_formatted.csv', index=False)
-print("✅ Converted! Saved as 'data/solar_forecast_formatted.csv'")
+output_path = os.path.join(script_dir, '..', '..', 'data', 'solar_forecast_formatted.csv')
+solar_data.to_csv(output_path, index=False)
+print(f"✅ Converted! Saved as '{output_path}'")
 print(solar_data.head())

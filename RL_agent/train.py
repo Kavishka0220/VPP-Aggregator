@@ -22,14 +22,19 @@ def main():
     # None = random start (default), or specify hour (0-23) for consistent training
     start_hour = None  # e.g., 11 for 11am, None for random
     episode_length = 96  # Number of steps (96 = 24 hours)
+
+    # === SCENARIO SELECTION ===
+    # Set to a scenario name (e.g., "heatwave_day") to train on that specific scenario.
+    # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
+    scenario_name = None  # Example: "heatwave_day", "weekend_low_load", etc.
     
     # Safety: Create directories
     os.makedirs("./checkpoints/", exist_ok=True)
     os.makedirs("./tensorboard_logs/", exist_ok=True)
     os.makedirs("./eval_logs/", exist_ok=True)
     
-    print("[INFO] Checking environment validity...")
-    check_env(UrbanVPPEnv(data_path="./data"), warn=True)
+    print(f"[INFO] Checking environment validity for scenario: {scenario_name}...")
+    check_env(UrbanVPPEnv(data_path="./data", scenario_name=scenario_name), warn=True)
     
     # 1. Create Training Environments (Multiple for parallel training)
     n_envs = 4  # Use 4 parallel environments for faster training
@@ -39,7 +44,7 @@ def main():
     
     def make_env():
         def _init():
-            env = UrbanVPPEnv(data_path="./data")
+            env = UrbanVPPEnv(data_path="./data", scenario_name=scenario_name)
             env = Monitor(env)
             return env
         return _init
@@ -62,7 +67,7 @@ def main():
     if start_step is not None:
         def make_env_timed():
             def _init():
-                env = UrbanVPPEnv(data_path="./data")
+                env = UrbanVPPEnv(data_path="./data", scenario_name=scenario_name)
                 env = TimedResetWrapper(env, start_step, episode_length)
                 env = Monitor(env)
                 return env

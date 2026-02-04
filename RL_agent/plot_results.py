@@ -19,6 +19,7 @@ STATS_PATH = os.path.abspath("./checkpoints/best_model/vecnormalize.pkl")  # Nor
 OUTPUT_DIR = os.path.abspath("./results_plots")  # Where to save plots
 
 steps_to_plot = 96  # One day (15 min intervals)
+SCENARIO_NAME = None # Set to same as train.py (e.g. "heatwave_day") or None for default
 
 # Node configuration
 SOLAR_NODE_INDICES = [0, 1, 2, 4, 6, 8]
@@ -32,7 +33,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # 1. Load the Environment and Model
 print("[INFO] Loading environment and model...")
 def make_env():
-    return UrbanVPPEnv(data_path="./data")
+    return UrbanVPPEnv(data_path="./data", scenario_name=SCENARIO_NAME, start_index=0)
 
 # Recreate env
 env = DummyVecEnv([make_env])

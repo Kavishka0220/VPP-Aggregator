@@ -22,8 +22,11 @@ class UrbanVPPEnv(gym.Env):
     
     metadata = {'render_modes': []}
     
-    def __init__(self, data_path="./data", scenario_name=None):
+    def __init__(self, data_path="./data", scenario_name=None, start_index=None):
         super(UrbanVPPEnv, self).__init__()
+        
+        # Testing configuration
+        self.default_start_index = start_index
 
         # Initialize OpenDSS Runner
         dss_file = os.path.join(parent_dir, "openDSS", "feeder_houses.dss")
@@ -148,6 +151,9 @@ class UrbanVPPEnv(gym.Env):
             if "episode_len" in options:
                 self.max_steps = options["episode_len"]
             print(f"[CONFIG] Starting at step {self.start_idx}, length {self.max_steps}")
+        elif self.default_start_index is not None:
+             self.start_idx = self.default_start_index
+             # print(f"[CONFIG] Starting at FIXED default step {self.start_idx}")
         else:
             max_start = len(self.solar_df) - self.max_steps
             if max_start > 0:

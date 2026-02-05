@@ -38,7 +38,7 @@ def main():
 
     # Set to a scenario name (e.g., "heatwave_day") to train on that specific scenario.
     # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
-    scenario_name = None
+    scenario_name = "solar_unavailable_day"
     
     # Safety: Create directories
     os.makedirs("./checkpoints/", exist_ok=True)
@@ -54,9 +54,13 @@ def main():
     # Calculate start_step from start_hour if specified
     start_step = start_hour * 4 if start_hour is not None else None
     
+    # Get absolute path to data directory for subprocess environments
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    data_path = os.path.join(os.path.dirname(script_dir), "data")
+    
     def make_env():
         def _init():
-            env = UrbanVPPEnv(data_path="./data", scenario_name=scenario_name)
+            env = UrbanVPPEnv(data_path=data_path, scenario_name=scenario_name)
             env = Monitor(env)
             return env
         return _init
@@ -79,7 +83,7 @@ def main():
     if start_step is not None:
         def make_env_timed():
             def _init():
-                env = UrbanVPPEnv(data_path="./data", scenario_name=scenario_name)
+                env = UrbanVPPEnv(data_path=data_path, scenario_name=scenario_name)
                 env = TimedResetWrapper(env, start_step, episode_length)
                 env = Monitor(env)
                 return env
@@ -151,7 +155,7 @@ def main():
     callbacks = CallbackList([checkpoint_callback, eval_callback])
     
     # 4. Start Training
-    total_timesteps = 500_000  # Increased to 0.5M for better convergence
+    total_timesteps = 1_000_000  # Updated to 1M steps for stable convergence
     print("[START] PPO Training...")
     print(f"   Target: {total_timesteps:,} Timesteps")
     print(f"   Checkpoints every: {checkpoint_callback.save_freq:,} steps")

@@ -27,18 +27,37 @@ def plot_training_curve():
     data = np.load(EVAL_LOG_PATH)
     
     # Extract data
-    # 'timesteps': Steps at which evaluation happened
-    # 'results': Matrix of (n_evaluations, n_eval_episodes) with rewards
     timesteps = data['timesteps']
     results = data['results']
     
+    print(f"[DEBUG] Loaded data shape: timesteps={timesteps.shape}, results={results.shape}")
+    print(f"[DEBUG] Max timestep found: {np.max(timesteps)}")
+
+    # Detect multiple training runs (where timesteps reset)
+    # Find indices where the next timestep is smaller than the current one
+    reset_indices = np.where(timesteps[1:] < timesteps[:-1])[0] + 1
+    
+    # Split data into sessions
+    split_timesteps = np.split(timesteps, reset_indices)
+    split_results = np.split(results, reset_indices)
+    
+    print(f"[INFO] Found {len(split_timesteps)} separate training sessions in logs.")
+    
+    # Select the longest session (most likely the 1M run)
+    longest_idx = np.argmax([len(arr) for arr in split_timesteps])
+    
+    timesteps = split_timesteps[longest_idx]
+    results = split_results[longest_idx]
+    
+    print(f"[INFO] Plotting session {longest_idx+1} (Length: {len(timesteps)} checkouts, Max Step: {np.max(timesteps)})")
+
     # Calculate statistics
     mean_rewards = np.mean(results, axis=1)
     std_rewards = np.std(results, axis=1)
     
     # Plot
     plt.figure(figsize=(10, 6))
-    plt.plot(timesteps, mean_rewards, color='#1f77b4', linewidth=2, label='Mean Reward')
+    plt.plot(timesteps, mean_rewards, color='#1f77b4', linewidth=2, label=f'Mean Reward (Run {longest_idx+1})')
     plt.fill_between(timesteps, 
                      mean_rewards - std_rewards, 
                      mean_rewards + std_rewards, 

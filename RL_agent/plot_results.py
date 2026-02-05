@@ -19,7 +19,7 @@ STATS_PATH = os.path.abspath("./checkpoints/best_model/vecnormalize.pkl")  # Nor
 OUTPUT_DIR = os.path.abspath("./results_plots")  # Where to save plots
 
 steps_to_plot = 96  # One day (15 min intervals)
-SCENARIO_NAME = None # Set to same as train.py (e.g. "heatwave_day") or None for default
+SCENARIO_NAME = "solar_unavailable_day" # Set to same as train.py (e.g. "heatwave_day") or None for default
 
 # Node configuration
 SOLAR_NODE_INDICES = [0, 1, 2, 4, 6, 8]

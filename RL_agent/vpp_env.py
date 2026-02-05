@@ -350,14 +350,15 @@ class UrbanVPPEnv(gym.Env):
         night_charge_bonus = 0.0
         if (hour < 6 or hour >= 23) and np.mean(self.soc) < 0.7:  # Cheapest hours with room to charge
             total_charge_power = np.sum(np.minimum(0, self.node_battery_power_kw))  # Negative value
-            # Good incentive for grid arbitrage - buy cheap, sell expensive later
-            night_charge_bonus = -3.0 * total_charge_power
+            # MAXIMIZED: Extremely strong incentive for cheapest rate arbitrage
+            night_charge_bonus = -15.0 * total_charge_power
         
         # Bonus: Evening discharge (6pm-11pm) - capitalize on high prices
         # Encourage using stored energy during expensive hours
         evening_discharge_bonus = 0.0
         if 18 <= hour < 23 and np.mean(self.soc) > 0.3:  # Peak hours with energy available
-            evening_discharge_bonus = 2.0 * np.sum(np.maximum(0, self.node_battery_power_kw))
+            # MAXIMIZED: Very strong incentive to discharge at peak prices
+            evening_discharge_bonus = 10.0 * np.sum(np.maximum(0, self.node_battery_power_kw))
 
         # B. Voltage Violation Penalty (0.9 to 1.1 p.u. limits)
         # Monitor all nodes for grid safety compliance
@@ -408,8 +409,8 @@ class UrbanVPPEnv(gym.Env):
                   + soc_health_penalty)
         
         # Reward normalization - scale down to help with learning stability
-        # Typical rewards are in range [-100, 100], normalize to reasonable range
-        reward = reward / 10.0
+        # Reduced normalization to preserve strong economic signals
+        reward = reward / 5.0
 
         # --- 4. NEXT STEP TRANSITION ---
         self.current_step += 1

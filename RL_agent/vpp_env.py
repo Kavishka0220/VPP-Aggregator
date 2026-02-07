@@ -350,8 +350,37 @@ class UrbanVPPEnv(gym.Env):
         night_charge_bonus = 0.0
         if (hour < 6 or hour >= 23) and np.mean(self.soc) < 0.7:  # Cheapest hours with room to charge
             total_charge_power = np.sum(np.minimum(0, self.node_battery_power_kw))  # Negative value
+            
+            # Predictive charging: Look ahead to see if tomorrow's solar will be sufficient
+            # If not, charge now at cheap night rates (13 cents)
+            predictive_multiplier = 1.0
+            
+            # Look ahead at next 24 hours of solar and load
+            steps_ahead = min(96, self.max_steps - self.current_step)  # Look ahead up to 24h
+            if steps_ahead > 24:  # Only predict if we have enough data
+                future_solar = self.solar_episode[self.current_step:self.current_step + steps_ahead]
+                future_load = self.load_episode[self.current_step:self.current_step + steps_ahead]
+                
+                # Calculate expected solar surplus during daylight hours (6am-6pm = steps 24-72)
+                daylight_start = max(0, int(24 - (hour * 4)))  # Steps until 6am
+                daylight_end = min(steps_ahead, daylight_start + 48)  # Next 12 hours after 6am
+                
+                if daylight_end > daylight_start:
+                    expected_solar = np.sum(future_solar[daylight_start:daylight_end])
+                    expected_load = np.sum(future_load[daylight_start:daylight_end])
+                    expected_surplus = expected_solar - expected_load
+                    
+                    # Calculate total battery capacity that needs charging
+                    total_capacity = 2 * self.home_batt_cap + self.bess_cap  # ~127 kWh
+                    energy_needed = total_capacity * (0.7 - np.mean(self.soc))  # Energy to reach 70% SOC
+                    
+                    # If solar surplus won't be enough to charge batteries, prioritize night charging
+                    if expected_surplus < energy_needed * 0.8:  # Need 80% of required energy from solar
+                        predictive_multiplier = 2.5  # Greatly increase night charging incentive
+            
             # MAXIMIZED: Extremely strong incentive for cheapest rate arbitrage
-            night_charge_bonus = -15.0 * total_charge_power
+            # Extra strong if forecast shows insufficient solar
+            night_charge_bonus = -15.0 * predictive_multiplier * total_charge_power
         
         # Bonus: Evening discharge (6pm-11pm) - capitalize on high prices
         # Encourage using stored energy during expensive hours

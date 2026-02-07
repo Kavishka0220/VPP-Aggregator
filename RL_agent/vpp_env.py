@@ -303,7 +303,7 @@ class UrbanVPPEnv(gym.Env):
         
         if 6 <= hour < 18:         # Daytime / solar hours (6am-6pm)
             buy_price, sell_price = 25, 19
-        elif 18 <= hour < 23:      # Evening peak (6pm-11pm)
+        elif 18 <= hour < 24:      # Evening peak (6pm-11pm)
             buy_price, sell_price = 54, 45
         else:                      # Night (11pm-6am)
             buy_price, sell_price = 13, 0
@@ -334,16 +334,45 @@ class UrbanVPPEnv(gym.Env):
             surplus_factor = min(1.0, net_solar_surplus / 20.0)  # Normalize by typical surplus
             bess_solar_charge_bonus = -10.0 * bess_charge_power * (1.0 + surplus_factor)  # Strong positive reward
 
-        # Bonus: Smart daytime charging (6am-6pm) - prioritize solar, allow grid when beneficial
-        # Encourage charging during moderate price hours when batteries need it
-        daytime_charge_bonus = 0.0
-        if 6 <= hour < 18 and np.mean(self.soc) < 0.7:  # Daytime with room to charge
+        # Bonus: MORNING charging (00:00-06:00) - cheapest night rates, strategic pre-charging
+        # Morning = midnight to 6am: charge at lowest cost (13 cents) to hold until evening peak
+        morning_charge_bonus = 0.0
+        if hour < 6 and np.mean(self.soc) < 0.7:  # Morning hours (00:00-06:00) with room to charge
             total_charge_power = np.sum(np.minimum(0, self.node_battery_power_kw))  # Negative value
-            # Strong bonus with solar surplus, moderate bonus otherwise (still cheaper than evening)
-            if net_solar_surplus > 0:
-                daytime_charge_bonus = -5.0 * total_charge_power  # Strong incentive with solar
+            # Strong incentive: charge at cheapest rates to prepare for day
+            morning_charge_bonus = -10.0 * total_charge_power  # Very strong morning charging
+        
+        # Bonus: Early day solar capture (06:00-12:00) - use any available solar first
+        # Prioritize solar generation even if partial, supplement with grid if needed
+        early_solar_bonus = 0.0
+        if 6 <= hour < 12 and np.mean(self.soc) < 0.7:  # Early day with room to charge
+            total_charge_power = np.sum(np.minimum(0, self.node_battery_power_kw))  # Negative value
+            if net_solar_surplus > 0 or np.sum(full_solar_profile) > 0:
+                # Use all available solar first, even if not enough for full charge
+                early_solar_bonus = -6.0 * total_charge_power  # Strong incentive with solar
+            elif np.mean(self.soc) < 0.5:  # Low battery, allow supplemental grid charging
+                early_solar_bonus = -1.5 * total_charge_power  # Mild grid supplement
+        
+        # Penalty: Noon/Afternoon charging without solar (12pm-6pm)
+        # Avoid charging at noon when no solar - save capacity for evening discharge
+        midday_charge_penalty = 0.0
+        if 12 <= hour < 18:  # Noon to evening
+            total_charge_power = np.sum(np.minimum(0, self.node_battery_power_kw))  # Negative value
+            if net_solar_surplus > 0 or np.sum(full_solar_profile) > 0:
+                # Solar available: allow charging but less incentive than morning
+                midday_charge_penalty = -3.0 * total_charge_power  # Moderate incentive
             else:
-                daytime_charge_bonus = -1.0 * total_charge_power  # Mild incentive from grid
+                # NO solar available: STRONG penalty for charging (wasteful, should use morning rates)
+                # Since total_charge_power is negative when charging, negate it to make penalty positive
+                midday_charge_penalty = -10.0 * total_charge_power  # Strong penalty (positive when charging)
+        
+        # Bonus: Afternoon conservation (2pm-6pm) - hold charge for evening peak
+        # Encourage keeping batteries charged (not discharging) before evening peak
+        afternoon_conservation_bonus = 0.0
+        if 14 <= hour < 18 and np.mean(self.soc) > 0.4:  # Afternoon with charge
+            # Small penalty for discharging during afternoon (save for evening)
+            total_discharge_power = np.sum(np.maximum(0, self.node_battery_power_kw))  # Positive value
+            afternoon_conservation_bonus = -2.0 * total_discharge_power  # Mild penalty
 
         # Bonus: Cheap night charging (11pm-6am) - arbitrage opportunity
         # Charge at low prices (buy=13) to discharge later at high prices
@@ -431,7 +460,10 @@ class UrbanVPPEnv(gym.Env):
                   + voltage_penalty 
                   + solar_charge_bonus
                   + bess_solar_charge_bonus
-                  + daytime_charge_bonus
+                  + morning_charge_bonus
+                  + early_solar_bonus
+                  + midday_charge_penalty
+                  + afternoon_conservation_bonus
                   + night_charge_bonus
                   + evening_discharge_bonus
                   + cycling_cost

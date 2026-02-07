@@ -155,7 +155,7 @@ def main():
     callbacks = CallbackList([checkpoint_callback, eval_callback])
     
     # 4. Start Training
-    total_timesteps = 250_000  # Updated to 250k steps for stable convergence
+    total_timesteps = 500_000  # Updated to 500k steps for stable convergence
     print("[START] PPO Training...")
     print(f"   Target: {total_timesteps:,} Timesteps")
     print(f"   Checkpoints every: {checkpoint_callback.save_freq:,} steps")

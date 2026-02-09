@@ -14,9 +14,11 @@ plt.rcParams['figure.dpi'] = 150
 plt.rcParams['font.size'] = 6
 
 # --- CONFIGURATION ---
-MODEL_PATH = os.path.abspath("./checkpoints/best_model/best_model")  # Use best model
-STATS_PATH = os.path.abspath("./checkpoints/best_model/vecnormalize.pkl")  # Normalization stats
-OUTPUT_DIR = os.path.abspath("./results_plots")  # Where to save plots
+# Get script directory for absolute paths
+script_dir = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(script_dir, "checkpoints", "best_model", "best_model")  # Use best model
+STATS_PATH = os.path.join(script_dir, "checkpoints", "best_model", "vecnormalize.pkl")  # Normalization stats
+OUTPUT_DIR = os.path.join(os.path.dirname(script_dir), "results_plots")  # Where to save plots
 
 steps_to_plot = 96  # One day (15 min intervals)
 SCENARIO_NAME = "solar_unavailable_day" # Set to same as train.py (e.g. "heatwave_day") or None for default
@@ -32,8 +34,11 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # 1. Load the Environment and Model
 print("[INFO] Loading environment and model...")
+# Get absolute path to data directory
+data_path = os.path.join(os.path.dirname(script_dir), "data")
+
 def make_env():
-    return UrbanVPPEnv(data_path="./data", scenario_name=SCENARIO_NAME, start_index=0)
+    return UrbanVPPEnv(data_path=data_path, scenario_name=SCENARIO_NAME, start_index=0)
 
 # Recreate env
 env = DummyVecEnv([make_env])
@@ -46,7 +51,7 @@ try:
 except FileNotFoundError:
     print(f"[WARNING] {STATS_PATH} not found. Trying fallback path...")
     try:
-        STATS_PATH_FALLBACK = "./checkpoints/ppo_vpp_aggregator_vecnormalize.pkl"
+        STATS_PATH_FALLBACK = os.path.join(script_dir, "checkpoints", "ppo_vpp_aggregator_vecnormalize.pkl")
         env = VecNormalize.load(STATS_PATH_FALLBACK, env)
         env.training = False
         env.norm_reward = False
@@ -63,9 +68,10 @@ try:
     print(f"[OK] Model loaded: '{MODEL_PATH}'")
 except FileNotFoundError:
     print(f"[ERROR] Model '{MODEL_PATH}.zip' not found!")
-    print("   Trying fallback: './checkpoints/ppo_vpp_aggregator'")
+    MODEL_PATH_FALLBACK = os.path.join(script_dir, "checkpoints", "ppo_vpp_aggregator")
+    print(f"   Trying fallback: '{MODEL_PATH_FALLBACK}'")
     try:
-        model = PPO.load("./checkpoints/ppo_vpp_aggregator")
+        model = PPO.load(MODEL_PATH_FALLBACK)
         print("[OK] Loaded fallback model")
     except:
         print("[ERROR] No model found. Run train.py first!")

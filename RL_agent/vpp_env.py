@@ -433,7 +433,8 @@ class UrbanVPPEnv(gym.Env):
         
         # Heavy Penalty: -100 per unit of violation
         # Example: 0.01 p.u. deviation → -1 penalty
-        voltage_penalty = -100.0 * total_violation
+        # voltage_penalty = -100.0 * total_violation
+        voltage_penalty = -50.0 * (total_violation ** 2)
 
         # C. Battery Health & Smoothness
         # Penalize rapid power changes to reduce battery stress

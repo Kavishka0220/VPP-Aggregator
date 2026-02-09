@@ -5,6 +5,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize, SubprocV
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback, CallbackList
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
+from stable_baselines3.common.evaluation import evaluate_policy
 import os
 import numpy as np
 from vpp_env import UrbanVPPEnv
@@ -40,10 +41,16 @@ def main():
     # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
     scenario_name = "solar_unavailable_day"
     
+    # Get script directory to ensure outputs save in RL_agent folder
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    checkpoint_dir = os.path.join(script_dir, "checkpoints")
+    tensorboard_dir = os.path.join(script_dir, "tensorboard_logs")
+    eval_dir = os.path.join(script_dir, "eval_logs")
+    
     # Safety: Create directories
-    os.makedirs("./checkpoints/", exist_ok=True)
-    os.makedirs("./tensorboard_logs/", exist_ok=True)
-    os.makedirs("./eval_logs/", exist_ok=True)
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    os.makedirs(tensorboard_dir, exist_ok=True)
+    os.makedirs(eval_dir, exist_ok=True)
     
     print(f"[INFO] Checking environment validity for scenario: {scenario_name}...")
     check_env(UrbanVPPEnv(data_path="./data", scenario_name=scenario_name), warn=True)
@@ -55,7 +62,6 @@ def main():
     start_step = start_hour * 4 if start_hour is not None else None
     
     # Get absolute path to data directory for subprocess environments
-    script_dir = os.path.dirname(os.path.abspath(__file__))
     data_path = os.path.join(os.path.dirname(script_dir), "data")
     
     def make_env():
@@ -125,7 +131,7 @@ def main():
         max_grad_norm=0.5,         # Gradient clipping
         policy_kwargs=policy_kwargs,
         seed=42,
-        tensorboard_log="./tensorboard_logs/"
+        tensorboard_log=tensorboard_dir
     )
     
     print("[INFO] PPO model initialized with improved hyperparameters")
@@ -134,7 +140,7 @@ def main():
     # Checkpoint: Save model periodically
     checkpoint_callback = CheckpointCallback(
         save_freq=20_000,          # Save every 20k steps
-        save_path="./checkpoints/",
+        save_path=checkpoint_dir,
         name_prefix="ppo_vpp",
         save_vecnormalize=True     # Save normalization stats with checkpoints
     )
@@ -142,8 +148,8 @@ def main():
     # Evaluation: Track performance on unseen episodes
     eval_callback = EvalCallback(
         eval_env,
-        best_model_save_path="./checkpoints/best_model/",
-        log_path="./eval_logs/",
+        best_model_save_path=os.path.join(checkpoint_dir, "best_model"),
+        log_path=eval_dir,
         eval_freq=10_000,          # Evaluate every 10k steps for better tracking
         n_eval_episodes=10,        # More episodes for robust evaluation
         deterministic=True,        # Use deterministic policy for evaluation
@@ -162,24 +168,53 @@ def main():
     print(f"   Evaluation every: {eval_callback.eval_freq:,} steps")
     print()
     
+    # Track initial reward before training
+    print("[INFO] Evaluating initial performance...")
+    initial_mean_reward, initial_std_reward = evaluate_policy(model, eval_env, n_eval_episodes=10, deterministic=True)
+    print(f"[INITIAL] Mean Reward: {initial_mean_reward:.2f} +/- {initial_std_reward:.2f}")
+    print()
+    
     model.learn(total_timesteps=total_timesteps, callback=callbacks, progress_bar=True)
+
+    # Evaluate final performance
+    print()
+    print("[INFO] Evaluating final performance...")
+    final_mean_reward, final_std_reward = evaluate_policy(model, eval_env, n_eval_episodes=10, deterministic=True)
+    print(f"[FINAL] Mean Reward: {final_mean_reward:.2f} +/- {final_std_reward:.2f}")
+    print()
+    
+    # Print improvement summary
+    improvement = final_mean_reward - initial_mean_reward
+    improvement_pct = (improvement / abs(initial_mean_reward)) * 100 if initial_mean_reward != 0 else 0
+    print("="*60)
+    print("TRAINING SUMMARY")
+    print("="*60)
+    print(f"Initial Mean Reward:  {initial_mean_reward:>10.2f} +/- {initial_std_reward:.2f}")
+    print(f"Final Mean Reward:    {final_mean_reward:>10.2f} +/- {final_std_reward:.2f}")
+    print(f"Improvement:          {improvement:>10.2f} ({improvement_pct:+.1f}%)")
+    print("="*60)
+    print()
 
     # 5. Save Final Model
     model_name = "ppo_vpp_aggregator"
-    model.save(f"./checkpoints/{model_name}")
-    env.save(f"./checkpoints/{model_name}_vecnormalize.pkl")
+    model.save(os.path.join(checkpoint_dir, model_name))
+    env.save(os.path.join(checkpoint_dir, f"{model_name}_vecnormalize.pkl"))
     
     # Also save the best model's normalization stats
-    eval_env.save(f"./checkpoints/best_model/vecnormalize.pkl")
+    eval_env.save(os.path.join(checkpoint_dir, "best_model", "vecnormalize.pkl"))
     
     print()
     print("[OK] Training Complete!")
-    print(f"   Final model: ./checkpoints/{model_name}.zip")
-    print(f"   Best model: ./checkpoints/best_model/best_model.zip")
+    print(f"   Final model: {os.path.join(checkpoint_dir, model_name)}.zip")
+    print(f"   Best model: {os.path.join(checkpoint_dir, 'best_model', 'best_model.zip')}")
     print(f"   Normalization stats saved")
     print()
     print("To view training progress:")
-    print("   tensorboard --logdir=./tensorboard_logs/")
+    print(f"   tensorboard --logdir={tensorboard_dir}")
+    print()
+    print("To plot results:")
+    print("   python plot_training.py  (training reward curve)")
+    print("   python plot_results.py   (simulation results)")
 
 if __name__ == "__main__":
     main()            

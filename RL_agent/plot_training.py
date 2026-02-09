@@ -10,6 +10,9 @@ sns.set_style("whitegrid")
 plt.rcParams['figure.dpi'] = 150
 plt.rcParams['font.size'] = 10
 
+# Get script directory for absolute paths
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
 def parse_tensorboard_logs(log_dir, tags=['rollout/ep_rew_mean', 'rollout/ep_len_mean', 'train/loss']):
     """
     Parse TensorBoard event files and extract training metrics.
@@ -58,7 +61,7 @@ def parse_tensorboard_logs(log_dir, tags=['rollout/ep_rew_mean', 'rollout/ep_len
     return data
 
 
-def find_latest_run(base_dir='./tensorboard_logs'):
+def find_latest_run(base_dir):
     """Find the latest PPO training run directory."""
     ppo_dirs = sorted([d for d in Path(base_dir).iterdir() if d.is_dir() and d.name.startswith('PPO_')],
                       key=lambda p: int(p.name.split('_')[1]))
@@ -218,11 +221,15 @@ def main():
     print("   VPP AGGREGATOR - TRAINING REWARD PLOTTER")
     print("="*60)
     
+    # Set up directories
+    tensorboard_dir = os.path.join(script_dir, 'tensorboard_logs')
+    output_dir = os.path.join(os.path.dirname(script_dir), 'results_plots')
+    
     # Find latest training run
-    latest_run = find_latest_run('./tensorboard_logs')
+    latest_run = find_latest_run(tensorboard_dir)
     
     if not latest_run:
-        print("[ERROR] No training runs found in './tensorboard_logs'")
+        print(f"[ERROR] No training runs found in '{tensorboard_dir}'")
         print("        Run train.py first to generate training data.")
         return
     
@@ -236,14 +243,14 @@ def main():
     
     # Plot training metrics
     print("\n[INFO] Generating training plots...")
-    plot_training_rewards(data, output_dir='./results_plots')
+    plot_training_rewards(data, output_dir=output_dir)
     
     # Optional: Compare multiple runs
     print("\n[INFO] Generating comparison plot for recent runs...")
-    plot_multiple_runs(base_dir='./tensorboard_logs', output_dir='./results_plots', max_runs=5)
+    plot_multiple_runs(base_dir=tensorboard_dir, output_dir=output_dir, max_runs=5)
     
     print("\n" + "="*60)
-    print("   Plotting complete! Check ./results_plots/")
+    print(f"   Plotting complete! Check {output_dir}")
     print("="*60)
 
 

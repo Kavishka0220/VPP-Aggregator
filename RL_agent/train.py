@@ -39,7 +39,7 @@ def main():
 
     # Set to a scenario name (e.g., "heatwave_day") to train on that specific scenario.
     # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
-    scenario_name = "solar_unavailable_day"
+    scenario_name = "solar_shifted_late"
     
     # Get script directory to ensure outputs save in RL_agent folder
     script_dir = os.path.dirname(os.path.abspath(__file__))

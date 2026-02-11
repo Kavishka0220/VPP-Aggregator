@@ -218,21 +218,19 @@ class UrbanVPPEnv(gym.Env):
             if self.soc[i] >= 0.8 and desired_power < 0:
                 desired_power = 0.0  # Prevent charging when battery full
 
-            # --- CONSTRAINT 2: NOON SOLAR-ONLY CHARGING (12pm-6pm) ---
-            # During midday hours, ONLY allow charging if there's excess solar
-            # Prevents grid charging during expensive daytime rates
-            if 12 <= hour < 18 and desired_power < 0:  # Noon to evening, trying to charge
+            # --- CONSTRAINT 2: BESS SOLAR-ONLY CHARGING ---
+            # BESS can ONLY charge from solar surplus, NEVER from grid
+            # This ensures the community battery is truly green energy storage
+            if is_bess and desired_power < 0:  # BESS trying to charge
                 if net_solar_surplus <= 0:  # No solar surplus available
-                    desired_power = 0.0  # Block all charging from grid
+                    desired_power = 0.0  # Block all charging - BESS is solar-only
             
-            # --- CONSTRAINT 3: Prefer solar charging for home batteries (soft preference) ---
-            # Home batteries get a small penalty if charging without local surplus
-            # but are still allowed to charge from grid during cheap hours
-            # This is handled in the reward function, not as a hard constraint
-            
-            # --- CONSTRAINT 4: REMOVED - Allow flexible charging/discharging ---
-            # Batteries can charge or discharge based on economic signals
-            # Agent will learn optimal strategies through reward function
+            # --- CONSTRAINT 3: Home Battery Daytime Solar Charging ---
+            # Home batteries prefer solar during daytime but can use grid at night
+            # During daytime hours, ONLY allow charging if there's excess solar
+            if not is_bess and 6 <= hour < 18 and desired_power < 0:
+                if net_solar_surplus <= 0:  # No solar surplus available
+                    desired_power = 0.0  # Block daytime grid charging for home batteries
             
             # Limit discharge to actual remaining demand
             if desired_power > 0:
@@ -357,11 +355,16 @@ class UrbanVPPEnv(gym.Env):
                 evening_peak_bonus = 10.0 * total_discharge_power
         
         # ----- SECTION 3: NIGHT (11pm-6am) -----
-        # Strategy: Charge at cheap rates (13 cents) ONLY if solar won't be sufficient tomorrow
+        # Strategy: HOME batteries can charge at cheap rates (13 cents)
+        # BESS is solar-only and cannot charge from grid at night
         night_charge_bonus = 0.0
         if hour < 6 or hour >= 24:  # Night hours
-            if np.mean(self.soc) < 0.7:  # Room to charge
-                total_charge_power = np.sum(np.minimum(0, self.node_battery_power_kw))  # Negative when charging
+            # Only consider HOME batteries (indices 0 and 2), exclude BESS
+            home_batt_soc = [self.soc[0], self.soc[1]]  # Home batteries only
+            if np.mean(home_batt_soc) < 0.7:  # Room to charge
+                # Only count home battery charging power (exclude BESS at index 10)
+                home_charge_power = self.node_battery_power_kw[0] + self.node_battery_power_kw[2]
+                home_charge_power = min(0, home_charge_power)  # Negative when charging
                 
                 # Predictive charging: Check if tomorrow's solar will be sufficient
                 solar_will_be_sufficient = False
@@ -380,21 +383,21 @@ class UrbanVPPEnv(gym.Env):
                         expected_load = np.sum(future_load[daylight_start:daylight_end])
                         expected_surplus = expected_solar - expected_load
                         
-                        # Calculate battery capacity needed
-                        total_capacity = 2 * self.home_batt_cap + self.bess_cap
-                        energy_needed = total_capacity * (0.75 - np.mean(self.soc))
+                        # Calculate home battery capacity only (BESS is solar-only)
+                        home_capacity = 2 * self.home_batt_cap
+                        energy_needed = home_capacity * (0.75 - np.mean(home_batt_soc))
                         
                         # If solar can provide 70%+ of needed energy, don't use grid
                         if expected_surplus > energy_needed * 0.7:
                             solar_will_be_sufficient = True
                 
-                # Decision based on solar forecast
+                # Decision based on solar forecast (only for home batteries)
                 if solar_will_be_sufficient:
                     # PENALTY: Don't charge from grid, save capacity for solar
-                    night_charge_bonus = 8.0 * total_charge_power
+                    night_charge_bonus = 8.0 * home_charge_power
                 else:
                     # REWARD: Charge at cheap night rates (solar won't be enough)
-                    night_charge_bonus = -15.0 * total_charge_power
+                    night_charge_bonus = -15.0 * home_charge_power
 
         # B. Voltage Violation Penalty (0.9 to 1.1 p.u. limits)
         # Monitor all nodes for grid safety compliance

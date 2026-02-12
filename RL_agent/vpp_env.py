@@ -45,9 +45,9 @@ class UrbanVPPEnv(gym.Env):
 
         # Specs
         self.home_batt_cap = 13.5 # kWh
-        self.bess_cap = 100.0 # kWh
+        self.bess_cap = 120.0 # kWh
         self.home_batt_power = 5.0 # kW
-        self.bess_power = 50.0 # kW
+        self.bess_power = 40.0 # kW
 
         # --- Battery Ramp Rate Limits (kW per 15 min step) ---
         self.home_batt_ramp = 2.0     # kW / step
@@ -385,8 +385,37 @@ class UrbanVPPEnv(gym.Env):
         grid_export = np.maximum(0, self.net_injection)   # Power sold to grid
         grid_import = np.maximum(0, -self.net_injection)  # Power bought from grid
 
-        revenue = np.sum(grid_export * sell_price)
-        cost = np.sum(grid_import * buy_price)
+        # Calculate overall grid costs and revenues
+        grid_export_revenue = np.sum(grid_export * sell_price)
+        grid_import_cost = np.sum(grid_import * buy_price)
+        
+        # --- BESS-Specific Economics ---
+        bess_power = self.node_battery_power_kw[self.bess_index]  # Node 10
+        
+        # BESS Discharge Revenue (positive power = discharging)
+        if bess_power > 0:
+            # BESS is discharging - supplying power to load or grid
+            # Calculate value based on current pricing
+            bess_discharge_revenue = bess_power * sell_price  # cents per 15-min
+        else:
+            bess_discharge_revenue = 0.0
+        
+        # BESS Charge Cost (negative power = charging)
+        if bess_power < 0:
+            # BESS is charging - consuming power from grid or solar
+            # Check if charging from solar surplus or grid
+            if net_solar_surplus > 0:
+                # Charging from solar surplus - minimal cost (only opportunity cost)
+                bess_charge_cost = 0.0  # Free solar energy
+            else:
+                # Charging from grid - pay the buy price
+                bess_charge_cost = abs(bess_power) * buy_price  # cents per 15-min
+        else:
+            bess_charge_cost = 0.0
+        
+        # Legacy variables for backward compatibility
+        revenue = grid_export_revenue
+        cost = grid_import_cost
 
         # ====== TIME-BASED CHARGING/DISCHARGING STRATEGY ======
         # Organized by the three pricing periods
@@ -566,6 +595,12 @@ class UrbanVPPEnv(gym.Env):
             "revenue": revenue,
             "cost": cost,
             "profit": revenue - cost,
+            # Separate economic metrics
+            "grid_export_revenue": grid_export_revenue,
+            "grid_import_cost": grid_import_cost,
+            "bess_discharge_revenue": bess_discharge_revenue,
+            "bess_charge_cost": bess_charge_cost,
+            # Battery states
             "soc_home0": self.soc[0],
             "soc_home2": self.soc[1],
             "soc_bess": self.soc[2],

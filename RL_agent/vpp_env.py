@@ -374,11 +374,11 @@ class UrbanVPPEnv(gym.Env):
         # --- Time-of-Use Pricing ---
         
         if 6 <= hour < 18:         # Daytime / solar hours (6am-6pm)
-            buy_price, sell_price = 25, 19
+            buy_price, sell_price = 35, 19
         elif 18 <= hour < 23:      # Evening peak (6pm-11pm)
-            buy_price, sell_price = 54, 45
+            buy_price, sell_price = 67, 45
         else:                      # Night (11pm-6am)
-            buy_price, sell_price = 13, 0
+            buy_price, sell_price = 21, 0
 
         # Grid economics based on net injection (solar + battery - load)
         # Positive = export to grid (earn money), Negative = import from grid (pay money)

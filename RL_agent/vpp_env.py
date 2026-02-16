@@ -31,6 +31,7 @@ class UrbanVPPEnv(gym.Env):
         # Initialize OpenDSS Runner
         dss_file = os.path.join(parent_dir, "openDSS", "feeder_houses.dss")
         self.dss_runner = VPPDSSRunner(dss_file)
+        self.dss_runner.compile()  # Compile circuit at initialization
 
         # --- 1. SYSTEM CONFIGURATION ---
         self.n_nodes = 11 # 0 to 9 (Houses) + 10 (BESS Node)
@@ -73,8 +74,10 @@ class UrbanVPPEnv(gym.Env):
         self.max_steps = 96
         self.soc = np.ones(3) * 0.5 
         self.prev_batt_power = np.zeros(3)
-        # We need 11 voltage values internally
-        self.voltages = np.ones(self.n_nodes, dtype=np.float32) # Store all voltages internally
+        # We need 11 voltage values internally (for 3-phase monitoring)
+        self.voltages = np.ones(self.n_nodes, dtype=np.float32)      # Min voltage per bus (RL sees this)
+        self.voltages_min = np.ones(self.n_nodes, dtype=np.float32)  # For undervoltage checking
+        self.voltages_max = np.ones(self.n_nodes, dtype=np.float32)  # For overvoltage checking
 
         # --- LOAD DATA ---
         try:
@@ -143,7 +146,10 @@ class UrbanVPPEnv(gym.Env):
         #self.soc = np.random.uniform(0.3, 0.7, size=3)
         self.soc = np.full(3, 0.2)
         self.prev_batt_power = np.zeros(self.n_storage_units)
-        self.voltages = np.ones(self.n_nodes, dtype=np.float32) # Reset voltages to 1.0
+        # Reset voltages to 1.0 p.u. (nominal)
+        self.voltages = np.ones(self.n_nodes, dtype=np.float32)
+        self.voltages_min = np.ones(self.n_nodes, dtype=np.float32)
+        self.voltages_max = np.ones(self.n_nodes, dtype=np.float32)
         
         # Pick random day or use provided start index
         if options is not None and "start_step" in options:
@@ -352,22 +358,22 @@ class UrbanVPPEnv(gym.Env):
             pv_kw=pv_kw,
             batt_home0_kw=batt0,
             batt_home2_kw=batt2,
-            bess_kw=bess
+            bess_kw=bess,
+            auto_compile=False
         )
         
-        # Map OpenDSS voltages to self.voltages (indices 0-10)
-        name_to_idx = {f"N{i}": i for i in range(10)}
-        name_to_idx["NBESS"] = 10
+        # Voltages are now in fixed order: N0, N1, ..., N9, NBESS (indices 0-10)
+        # Store min voltage for observations (RL agent sees this)
+        self.voltages = np.array(step_res.vmin_pu_by_bus, dtype=np.float32)
         
-        new_voltages = np.ones(self.n_nodes, dtype=np.float32)
-        for bus_name, v_pu in zip(step_res.buses, step_res.vmag_pu):
-            bus_name_upper = bus_name.upper()
-            if bus_name_upper in name_to_idx:
-                idx = name_to_idx[bus_name_upper]
-                new_voltages[idx] = v_pu
+        # For penalty calculation, check both min and max across 3 phases
+        self.voltages_min = self.voltages.copy()
+        self.voltages_max = np.zeros(self.n_nodes, dtype=np.float32)
         
-        self.voltages = new_voltages
-        voltages_for_penalty = self.voltages.copy()
+        # Calculate max voltage per bus from 3-phase data
+        for i, (va, vb, vc) in enumerate(step_res.vabc_pu_by_bus):
+            phases = [v for v in [va, vb, vc] if not np.isnan(v)]
+            self.voltages_max[i] = max(phases) if phases else 1.0
         
         # --- 4. REWARD CALCULATION ---
         # A. Economic Profit
@@ -523,19 +529,21 @@ class UrbanVPPEnv(gym.Env):
                         night_charge_bonus += -10.0 * bess_charge_power
 
         # B. Voltage Violation Penalty (0.9 to 1.1 p.u. limits)
-        # Monitor all nodes for grid safety compliance
+        # Monitor all nodes for grid safety compliance (3-phase aware)
         critical_nodes = list(range(10)) + [self.bess_index]
 
-        pcc_voltages = voltages_for_penalty[critical_nodes]
-
-        # Calculate how far we are outside the safe zone
-        # Logic: max(0, V - 1.1) + max(0, 0.9 - V)
-        over_voltage = np.maximum(0, pcc_voltages - 1.1)
-        under_voltage = np.maximum(0, 0.9 - pcc_voltages)
+        # Check undervoltage: min voltage per bus should be >= 0.9
+        min_voltages = self.voltages_min[critical_nodes]
+        under_voltage = np.maximum(0, 0.9 - min_voltages)
+        
+        # Check overvoltage: max voltage per bus should be <= 1.1
+        max_voltages = self.voltages_max[critical_nodes]
+        over_voltage = np.maximum(0, max_voltages - 1.1)
         
         total_violation = np.sum(over_voltage + under_voltage)
         
         # Heavy Penalty: -100 per unit of violation
+        # Example: 0.01 p.u. deviation → -1 penalty
         # Example: 0.01 p.u. deviation → -1 penalty
         # voltage_penalty = -100.0 * total_violation
         voltage_penalty = -50.0 * (total_violation ** 2)
@@ -586,8 +594,8 @@ class UrbanVPPEnv(gym.Env):
             "hour": hour,
             "net_demand": net_demand,
             "remaining_demand": self.remaining_demand,
-            "max_voltage": np.max(pcc_voltages),
-            "min_voltage": np.min(pcc_voltages),
+            "max_voltage": np.max(max_voltages),  # Max across all phases and buses
+            "min_voltage": np.min(min_voltages),  # Min across all phases and buses
             "violation": total_violation,
             "solar_surplus": net_solar_surplus,
             "total_load": total_load,

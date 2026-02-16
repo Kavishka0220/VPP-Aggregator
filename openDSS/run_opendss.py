@@ -91,14 +91,19 @@ class VPPDSSRunner:
         p_kw = float(p_kw)
 
         if abs(p_kw) < 1e-6:
-            dss.Command(f"edit storage.{name} state=idl kw=0")
+            # Idle state - no power flow
+            dss.Command(f"edit storage.{name} state=idling kw=0")
             return
 
         if p_kw > 0:
-            # discharge: inject
+            # Discharge: inject power to grid (acts as generator)
             dss.Command(f"edit storage.{name} state=discharging kw={p_kw}")
         else:
-            # charge: consume
+            # Charge: consume power from grid 
+            # OpenDSS storage charging doesn't work as expected
+            # Workaround: Model as additional load by adding equivalent load element
+            # Or: Keep storage idle and add the charging load separately
+            # For now: Use state=charging with positive kW (consume power)
             dss.Command(f"edit storage.{name} state=charging kw={abs(p_kw)}")
 
     # ---------- read outputs ----------

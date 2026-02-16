@@ -44,9 +44,9 @@ new generator.PV8 bus1=N8.1.2.3 phases=3 kv=0.4 kw=0 model=1
 
 ! ========= STORAGE (home_batt_indices = [0,2], bess_index = 10) =========
 ! We will control their kW from Python via "edit storage..."
-new storage.Batt0 bus1=N0.1.2.3 phases=3 kv=0.4 kwrated=5  kwh=10 %stored=50 state=idl
-new storage.Batt2 bus1=N2.1.2.3 phases=3 kv=0.4 kwrated=5  kwh=10 %stored=50 state=idl
-new storage.BESS  bus1=NBESS.1.2.3 phases=3 kv=0.4 kwrated=20 kwh=50 %stored=50 state=idl
+new storage.Batt0 bus1=N0.1.2.3 phases=3 kv=0.4 kwrated=5  kwhrated=13.5 %stored=50 state=idling dispmode=External %effcharge=95 %effdischarge=95
+new storage.Batt2 bus1=N2.1.2.3 phases=3 kv=0.4 kwrated=5  kwhrated=13.5 %stored=50 state=idling dispmode=External %effcharge=95 %effdischarge=95
+new storage.BESS  bus1=NBESS.1.2.3 phases=3 kv=0.4 kwrated=40 kwhrated=120 %stored=50 state=idling dispmode=External %effcharge=95 %effdischarge=95
 
 set voltagebases=[0.4]
 calcvoltagebases

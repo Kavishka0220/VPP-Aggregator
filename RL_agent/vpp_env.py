@@ -214,7 +214,7 @@ class UrbanVPPEnv(gym.Env):
             charge_intensity = min(1.0, net_solar_surplus / self.bess_power)
             action_modified[bess_action_idx] = -charge_intensity  # Negative = charging
         
-        # Strategy 2: Predictive charging from grid during cheap night rates (0-6am, 13 cents)
+        # Strategy 2: Predictive charging from grid during cheap night rates (0-6am, 21 LKR)
         # Calculate if today's solar surplus will be sufficient to fully charge BESS
         elif hour < 6:
             # Look ahead to predict today's solar surplus
@@ -377,14 +377,14 @@ class UrbanVPPEnv(gym.Env):
         
         # --- 4. REWARD CALCULATION ---
         # A. Economic Profit
-        # --- Time-of-Use Pricing ---
+        # --- Time-of-Use Pricing (Sri Lankan Rupees - LKR) ---
         
         if 6 <= hour < 18:         # Daytime / solar hours (6am-6pm)
-            buy_price, sell_price = 35, 19
+            buy_price, sell_price = 35, 19  # LKR per kWh per 15-min
         elif 18 <= hour < 23:      # Evening peak (6pm-11pm)
-            buy_price, sell_price = 67, 45
+            buy_price, sell_price = 67, 45  # LKR per kWh per 15-min
         else:                      # Night (11pm-6am)
-            buy_price, sell_price = 21, 0
+            buy_price, sell_price = 21, 0   # LKR per kWh per 15-min
 
         # Grid economics based on net injection (solar + battery - load)
         # Positive = export to grid (earn money), Negative = import from grid (pay money)
@@ -402,7 +402,7 @@ class UrbanVPPEnv(gym.Env):
         if bess_power > 0:
             # BESS is discharging - supplying power to load or grid
             # Calculate value based on current pricing
-            bess_discharge_revenue = bess_power * sell_price  # cents per 15-min
+            bess_discharge_revenue = bess_power * sell_price  # LKR per 15-min
         else:
             bess_discharge_revenue = 0.0
         
@@ -415,7 +415,7 @@ class UrbanVPPEnv(gym.Env):
                 bess_charge_cost = 0.0  # Free solar energy
             else:
                 # Charging from grid - pay the buy price
-                bess_charge_cost = abs(bess_power) * buy_price  # cents per 15-min
+                bess_charge_cost = abs(bess_power) * buy_price  # LKR per 15-min
         else:
             bess_charge_cost = 0.0
         
@@ -450,11 +450,11 @@ class UrbanVPPEnv(gym.Env):
         if 18 <= hour < 23:  # Evening peak hours
             if np.mean(self.soc) > 0.3:  # Only discharge if battery has energy
                 total_discharge_power = np.sum(np.maximum(0, self.node_battery_power_kw))
-                # STRONG incentive to discharge at peak prices (54 cents)
+                # STRONG incentive to discharge at peak prices (67 LKR)
                 evening_peak_bonus = 10.0 * total_discharge_power
         
         # ----- SECTION 3: NIGHT (11pm-6am) -----
-        # Strategy: HOME batteries and BESS can charge at cheap rates (13 cents)
+        # Strategy: HOME batteries and BESS can charge at cheap rates (21 LKR)
         # BESS charges at night to supplement insufficient solar generation
         night_charge_bonus = 0.0
         if hour < 6 or hour >= 24:  # Night hours

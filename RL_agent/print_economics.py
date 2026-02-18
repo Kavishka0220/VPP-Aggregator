@@ -50,6 +50,14 @@ def print_economics(model_path="checkpoints/best_model/best_model", num_episodes
         "bess_charge_cost": 0.0,
         "total_reward": 0.0,
         "voltage_violations": 0,
+        # Power/Energy metrics
+        "total_solar_kwh": 0.0,
+        "total_load_kwh": 0.0,
+        "grid_export_kwh": 0.0,
+        "grid_import_kwh": 0.0,
+        "bess_discharge_kwh": 0.0,
+        "bess_charge_kwh": 0.0,
+        "solar_surplus_kwh": 0.0,
     }
     
     for episode in range(num_episodes):
@@ -68,6 +76,14 @@ def print_economics(model_path="checkpoints/best_model/best_model", num_episodes
             "bess_charge_cost": 0.0,
             "total_reward": 0.0,
             "voltage_violations": 0,
+            # Power/Energy metrics
+            "total_solar_kwh": 0.0,
+            "total_load_kwh": 0.0,
+            "grid_export_kwh": 0.0,
+            "grid_import_kwh": 0.0,
+            "bess_discharge_kwh": 0.0,
+            "bess_charge_kwh": 0.0,
+            "solar_surplus_kwh": 0.0,
         }
         
         # Run episode
@@ -84,31 +100,84 @@ def print_economics(model_path="checkpoints/best_model/best_model", num_episodes
             episode_metrics["bess_charge_cost"] += info.get("bess_charge_cost", 0.0)
             episode_metrics["total_reward"] += reward
             
+            # Accumulate energy metrics (15-min timestep = 0.25 hour)
+            episode_metrics["total_solar_kwh"] += info.get("total_solar", 0.0) * 0.25
+            episode_metrics["total_load_kwh"] += info.get("total_load", 0.0) * 0.25
+            
+            # Calculate grid import/export from net_demand
+            net_demand = info.get("remaining_demand", 0.0)
+            if net_demand > 0:
+                episode_metrics["grid_import_kwh"] += net_demand * 0.25
+            else:
+                episode_metrics["grid_export_kwh"] += abs(net_demand) * 0.25
+            
+            # BESS energy flows
+            bess_power = info.get("bess_power", 0.0)
+            if bess_power > 0:
+                episode_metrics["bess_discharge_kwh"] += bess_power * 0.25
+            else:
+                episode_metrics["bess_charge_kwh"] += abs(bess_power) * 0.25
+            
+            episode_metrics["solar_surplus_kwh"] += max(0, info.get("solar_surplus", 0.0)) * 0.25
+            
             if info.get("violation", 0) > 0:
                 episode_metrics["voltage_violations"] += 1
         
         # Print episode results
         print(f"Completed {step_count} steps\n")
         
+        # Calculate derived metrics
+        self_consumption = episode_metrics["total_load_kwh"] - episode_metrics["grid_import_kwh"]
+        self_consumption_rate = (self_consumption / episode_metrics["total_load_kwh"] * 100) if episode_metrics["total_load_kwh"] > 0 else 0
+        solar_utilization_rate = ((episode_metrics["total_solar_kwh"] - episode_metrics["grid_export_kwh"]) / episode_metrics["total_solar_kwh"] * 100) if episode_metrics["total_solar_kwh"] > 0 else 0
+        
         print("┌" + "─"*78 + "┐")
-        print("│" + " "*25 + "ECONOMIC BREAKDOWN (cents)" + " "*27 + "│")
+        print("│" + " "*27 + "POWER & ENERGY SUMMARY" + " "*29 + "│")
+        print("├" + "─"*78 + "┤")
+        
+        # Energy Generation & Consumption
+        print("│ ENERGY FLOWS (kWh):" + " "*57 + "│")
+        print(f"│   Solar Generation:      {episode_metrics['total_solar_kwh']:>10.2f} kWh" + " "*38 + "│")
+        print(f"│   Load Consumption:      {episode_metrics['total_load_kwh']:>10.2f} kWh" + " "*38 + "│")
+        print(f"│   Grid Import:           {episode_metrics['grid_import_kwh']:>10.2f} kWh" + " "*38 + "│")
+        print(f"│   Grid Export:           {episode_metrics['grid_export_kwh']:>10.2f} kWh" + " "*38 + "│")
+        print("│" + " "*78 + "│")
+        
+        # Battery Operations
+        print("│ BATTERY OPERATIONS (kWh):" + " "*51 + "│")
+        print(f"│   BESS Charged:          {episode_metrics['bess_charge_kwh']:>10.2f} kWh" + " "*38 + "│")
+        print(f"│   BESS Discharged:       {episode_metrics['bess_discharge_kwh']:>10.2f} kWh" + " "*38 + "│")
+        net_bess_energy = episode_metrics['bess_discharge_kwh'] - episode_metrics['bess_charge_kwh']
+        print(f"│   Net BESS Energy:       {net_bess_energy:>10.2f} kWh" + " "*38 + "│")
+        print(f"│   Solar Surplus:         {episode_metrics['solar_surplus_kwh']:>10.2f} kWh" + " "*38 + "│")
+        print("│" + " "*78 + "│")
+        
+        # System Efficiency
+        print("│ SYSTEM EFFICIENCY:" + " "*58 + "│")
+        print(f"│   Self-Consumption:      {self_consumption_rate:>10.1f} %" + " "*40 + "│")
+        print(f"│   Solar Utilization:     {solar_utilization_rate:>10.1f} %" + " "*40 + "│")
+        
+        print("└" + "─"*78 + "┘")
+        print()
+        print("┌" + "─"*78 + "┐")
+        print("│" + " "*23 + "ECONOMIC BREAKDOWN (Sri Lankan Rupees)" + " "*17 + "│")
         print("├" + "─"*78 + "┤")
         
         # Grid Economics
         print("│ GRID OPERATIONS:" + " "*61 + "│")
-        print(f"│   Export Revenue:        {episode_metrics['grid_export_revenue']:>10.2f} cents" + " "*37 + "│")
-        print(f"│   Import Cost:          -{episode_metrics['grid_import_cost']:>10.2f} cents" + " "*37 + "│")
+        print(f"│   Export Revenue:        {episode_metrics['grid_export_revenue']:>10.2f} LKR" + " "*39 + "│")
+        print(f"│   Import Cost:          -{episode_metrics['grid_import_cost']:>10.2f} LKR" + " "*39 + "│")
         grid_net = episode_metrics['grid_export_revenue'] - episode_metrics['grid_import_cost']
-        print(f"│   Net Grid Profit:       {grid_net:>10.2f} cents" + " "*37 + "│")
+        print(f"│   Net Grid Profit:       {grid_net:>10.2f} LKR" + " "*39 + "│")
         
         print("│" + " "*78 + "│")
         
         # BESS Economics
         print("│ BESS OPERATIONS:" + " "*61 + "│")
-        print(f"│   Discharge Revenue:     {episode_metrics['bess_discharge_revenue']:>10.2f} cents" + " "*37 + "│")
-        print(f"│   Charge Cost:          -{episode_metrics['bess_charge_cost']:>10.2f} cents" + " "*37 + "│")
+        print(f"│   Discharge Revenue:     {episode_metrics['bess_discharge_revenue']:>10.2f} LKR" + " "*39 + "│")
+        print(f"│   Charge Cost:          -{episode_metrics['bess_charge_cost']:>10.2f} LKR" + " "*39 + "│")
         bess_net = episode_metrics['bess_discharge_revenue'] - episode_metrics['bess_charge_cost']
-        print(f"│   Net BESS Profit:       {bess_net:>10.2f} cents" + " "*37 + "│")
+        print(f"│   Net BESS Profit:       {bess_net:>10.2f} LKR" + " "*39 + "│")
         
         print("│" + " "*78 + "│")
         
@@ -118,18 +187,18 @@ def print_economics(model_path="checkpoints/best_model/best_model", num_episodes
         net_profit = total_revenue - total_cost
         
         print("│ TOTAL SYSTEM:" + " "*64 + "│")
-        print(f"│   Total Revenue:         {total_revenue:>10.2f} cents" + " "*37 + "│")
-        print(f"│   Total Cost:           -{total_cost:>10.2f} cents" + " "*37 + "│")
-        print(f"│   Net Profit:            {net_profit:>10.2f} cents  (${net_profit/100:.2f})" + " "*26 + "│")
+        print(f"│   Total Revenue:         {total_revenue:>10.2f} LKR" + " "*39 + "│")
+        print(f"│   Total Cost:           -{total_cost:>10.2f} LKR" + " "*39 + "│")
+        print(f"│   Net Profit:            {net_profit:>10.2f} LKR" + " "*39 + "│")
         
         print("│" + " "*78 + "│")
         
-        # Convert to dollars for daily/annual projections
-        daily_profit = net_profit / 100  # cents to dollars
+        # Daily/annual projections in LKR
+        daily_profit = net_profit  # Already in LKR per 15-min timestep
         annual_profit = daily_profit * 365
         
-        print(f"│   Daily Profit:          ${daily_profit:>10.2f}" + " "*47 + "│")
-        print(f"│   Annual Projection:     ${annual_profit:>10.2f}" + " "*47 + "│")
+        print(f"│   Daily Profit:          {daily_profit:>10.2f} LKR" + " "*41 + "│")
+        print(f"│   Annual Projection:     {annual_profit:>10.2f} LKR" + " "*41 + "│")
         
         print("│" + " "*78 + "│")
         
@@ -152,14 +221,30 @@ def print_economics(model_path="checkpoints/best_model/best_model", num_episodes
         
         avg_metrics = {k: v/num_episodes for k, v in total_metrics.items()}
         
+        # Calculate derived metrics
+        avg_self_consumption = avg_metrics["total_load_kwh"] - avg_metrics["grid_import_kwh"]
+        avg_self_consumption_rate = (avg_self_consumption / avg_metrics["total_load_kwh"] * 100) if avg_metrics["total_load_kwh"] > 0 else 0
+        avg_solar_utilization_rate = ((avg_metrics["total_solar_kwh"] - avg_metrics["grid_export_kwh"]) / avg_metrics["total_solar_kwh"] * 100) if avg_metrics["total_solar_kwh"] > 0 else 0
+        
+        print("ENERGY METRICS:")
+        print(f"  Solar Generation:       {avg_metrics['total_solar_kwh']:>10.2f} kWh")
+        print(f"  Load Consumption:       {avg_metrics['total_load_kwh']:>10.2f} kWh")
+        print(f"  Grid Import:            {avg_metrics['grid_import_kwh']:>10.2f} kWh")
+        print(f"  Grid Export:            {avg_metrics['grid_export_kwh']:>10.2f} kWh")
+        print(f"  BESS Charge/Discharge:  {avg_metrics['bess_charge_kwh']:>10.2f} / {avg_metrics['bess_discharge_kwh']:>10.2f} kWh")
+        print(f"  Self-Consumption:       {avg_self_consumption_rate:>10.1f} %")
+        print(f"  Solar Utilization:      {avg_solar_utilization_rate:>10.1f} %")
+        print()
+        
         avg_net_profit = (avg_metrics['grid_export_revenue'] + avg_metrics['bess_discharge_revenue'] 
                          - avg_metrics['grid_import_cost'] - avg_metrics['bess_charge_cost'])
         
-        print(f"Average Net Profit:       {avg_net_profit:>10.2f} cents (${avg_net_profit/100:.2f})")
-        print(f"Average Daily Profit:     ${avg_net_profit/100:>10.2f}")
-        print(f"Average Annual Profit:    ${avg_net_profit/100*365:>10.2f}")
-        print(f"Average Total Reward:     {avg_metrics['total_reward']:>10.2f}")
-        print(f"Average Violations:       {avg_metrics['voltage_violations']:>10.1f} steps")
+        print("ECONOMIC METRICS:")
+        print(f"  Average Net Profit:     {avg_net_profit:>10.2f} LKR")
+        print(f"  Average Daily Profit:   {avg_net_profit:>10.2f} LKR")
+        print(f"  Average Annual Profit:  {avg_net_profit*365:>10.2f} LKR")
+        print(f"  Average Total Reward:   {avg_metrics['total_reward']:>10.2f}")
+        print(f"  Average Violations:     {avg_metrics['voltage_violations']:>10.1f} steps")
     
     print("\n" + "="*80)
     print("   ANALYSIS COMPLETE")

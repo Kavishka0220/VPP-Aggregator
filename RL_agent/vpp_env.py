@@ -214,9 +214,9 @@ class UrbanVPPEnv(gym.Env):
             charge_intensity = min(1.0, net_solar_surplus / self.bess_power)
             action_modified[bess_action_idx] = -charge_intensity  # Negative = charging
         
-        # Strategy 2: Predictive charging from grid during cheap night rates (0-6am, 21 LKR)
+        # Strategy 2: Predictive charging from grid during cheap night rates (11pm-6am, 21 LKR)
         # Calculate if today's solar surplus will be sufficient to fully charge BESS
-        elif hour < 6:
+        elif hour < 6 or hour >= 23:
             # Look ahead to predict today's solar surplus
             steps_remaining = self.max_steps - self.current_step
             steps_until_evening = min(steps_remaining, int((18 - hour) * 4))  # Until 6pm
@@ -248,8 +248,14 @@ class UrbanVPPEnv(gym.Env):
                     
                     if energy_deficit > 5.0:  # More than 5 kWh deficit
                         # Solar won't be enough - charge from grid at night
-                        # Calculate remaining night hours for charging (0-6am = up to 24 steps)
-                        steps_until_6am = int((6 - hour) * 4)
+                        # Calculate remaining night hours for charging (11pm-6am = up to 28 steps)
+                        if hour >= 23:
+                            # From 11pm to midnight + midnight to 6am
+                            steps_until_6am = int((24 - hour) * 4 + 6 * 4)
+                        else:
+                            # Already past midnight, just count to 6am
+                            steps_until_6am = int((6 - hour) * 4)
+                        
                         if steps_until_6am > 0:
                             # Spread deficit charging across remaining night hours
                             power_per_step = energy_deficit / (steps_until_6am * 0.25)
@@ -266,6 +272,12 @@ class UrbanVPPEnv(gym.Env):
                         action_modified[bess_action_idx] = -1.0  # Full charge
                     else:
                         action_modified[bess_action_idx] = -0.7  # High charge
+            else:
+                # Insufficient lookahead data - fallback to SoC-based charging
+                if bess_soc < 0.4:
+                    action_modified[bess_action_idx] = -0.8  # Strong charge when low
+                elif bess_soc < 0.6:
+                    action_modified[bess_action_idx] = -0.5  # Moderate charge
         
         # --- 2. PHYSICS: APPLY ACTIONS ---
         # Create an array of size 11 for the grid physics
@@ -291,11 +303,11 @@ class UrbanVPPEnv(gym.Env):
                 desired_power = 0.0  # Prevent charging when battery full
 
             # --- CONSTRAINT 2: BESS CHARGING STRATEGY ---
-            # BESS prefers solar but can use cheap night grid power (0-6am)
+            # BESS prefers solar but can use cheap night grid power (11pm-6am)
             # to ensure sufficient charge for evening peak
             if is_bess and desired_power < 0:  # BESS trying to charge
                 # Allow charging if: (1) solar surplus available, OR (2) cheap night hours
-                if net_solar_surplus <= 0 and hour >= 6:
+                if net_solar_surplus <= 0 and 6 <= hour < 23:
                     desired_power = 0.0  # Block grid charging outside night hours
             
             # --- CONSTRAINT 3: Home Battery Daytime Solar Charging ---
@@ -457,7 +469,7 @@ class UrbanVPPEnv(gym.Env):
         # Strategy: HOME batteries and BESS can charge at cheap rates (21 LKR)
         # BESS charges at night to supplement insufficient solar generation
         night_charge_bonus = 0.0
-        if hour < 6 or hour >= 24:  # Night hours
+        if hour < 6 or hour >= 23:  # Night hours
             # HOME BATTERY CHARGING
             home_batt_soc = [self.soc[0], self.soc[1]]  # Home batteries only
             if np.mean(home_batt_soc) < 0.7:  # Room to charge

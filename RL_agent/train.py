@@ -119,7 +119,7 @@ def main():
         "MlpPolicy", 
         env, 
         verbose=1,
-        learning_rate=linear_schedule(2e-4),  # Decaying LR for better convergence
+        learning_rate=linear_schedule(10e-4),  # Decaying LR for better convergence
         gamma=0.99,                # Discount factor
         gae_lambda=0.95,           # GAE smoothing
         clip_range=0.2,            # PPO clipping parameter

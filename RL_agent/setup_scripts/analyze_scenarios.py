@@ -36,12 +36,29 @@ def load_scenarios(data_dir):
             
         # Read Data
         # Assuming no header for time, and 10 columns for houses
-        df = pd.read_csv(file_path)
-        
-        # Create 15-min time index for 24 hours (96 steps)
-        # Using a dummy date to make plotting easier
-        times = pd.date_range(start='2024-01-01', periods=96, freq='15min')
-        df.index = times
+        try:
+            df = pd.read_csv(file_path)
+            
+            # Convert all columns to numeric, replacing non-numeric with NaN
+            df = df.apply(pd.to_numeric, errors='coerce')
+            
+            # Drop rows/columns that are all NaN
+            df = df.dropna(how='all', axis=0).dropna(how='all', axis=1)
+            
+            # Skip if no valid data remains
+            if df.empty or len(df) < 96:
+                print(f"[WARNING] Skipping {filename}: insufficient numeric data")
+                continue
+            
+            # Create 15-min time index for 24 hours (96 steps)
+            # Using a dummy date to make plotting easier
+            times = pd.date_range(start='2024-01-01', periods=len(df[:96]), freq='15min')
+            df = df.iloc[:96]  # Take only first 96 rows
+            df.index = times
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to load {filename}: {e}")
+            continue
         
         if scenario_name not in scenarios:
             scenarios[scenario_name] = {}
@@ -56,6 +73,11 @@ def main():
     # Go up 2 levels: RL_agent/setup_scripts -> RL_agent -> VPP-Aggregator
     # Then down into data/forecast_scenarios
     data_dir = os.path.join(script_dir, '..', '..', 'data', 'forecast_scenarios')
+    
+    # Create output folder for plots
+    output_dir = os.path.join(script_dir, '..', '..', 'results_plots', 'scenario_analysis')
+    os.makedirs(output_dir, exist_ok=True)
+    print(f"Saving plots to: {os.path.abspath(output_dir)}")
 
     scenarios_data = load_scenarios(data_dir)
     print(f"Loaded {len(scenarios_data)} scenarios: {list(scenarios_data.keys())}")
@@ -99,6 +121,12 @@ def main():
             plt.xlabel('Time')
             plt.legend()
             plt.tight_layout()
+            
+            # Save individual scenario plot
+            plot_filename = os.path.join(output_dir, f'scenario_{name}.png')
+            plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
+            print(f"Saved: {plot_filename}")
+            plt.close()  # Close to free memory
 
     # 2. One Figure for All Loads and Solar (Two Subplots)
     # "one figure for all loads and solar in 2 plots"
@@ -127,11 +155,18 @@ def main():
     plt.subplots_adjust(top=0.95, bottom=0.07, left=0.07, right=0.83, hspace=0.25)
 
     # Adjust layout to make room for legend on the right (rect=[left, bottom, right, top])
-
+    
+    # Save combined figure
+    combined_filename = os.path.join(output_dir, 'all_scenarios_combined.png')
+    plt.savefig(combined_filename, dpi=300, bbox_inches='tight')
+    print(f"Saved: {combined_filename}")
+    
     plt.show()
 
     if len(scenarios_data) == 0:
         print("No complete scenarios found (requiring both load and solar files).")
+    else:
+        print(f"\n✓ All plots saved to: {os.path.abspath(output_dir)}")
 
 if __name__ == "__main__":
     main()

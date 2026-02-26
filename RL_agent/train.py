@@ -39,7 +39,9 @@ def main():
 
     # Set to a scenario name (e.g., "heatwave_day") to train on that specific scenario.
     # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
-    scenario_name = "heatwave_day"  # Change to desired scenario or None for default
+    scenario_name = "weekend_low_load"  # Change to desired scenario or None for default
+
+
     
     # Get script directory to ensure outputs save in RL_agent folder
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -119,8 +121,8 @@ def main():
         "MlpPolicy", 
         env, 
         verbose=1,
-        learning_rate=linear_schedule(15e-4),  # Decaying LR for better convergence
-        gamma=0.99,                # Discount factor
+        learning_rate=linear_schedule(12e-4),  # Decaying LR for better convergence
+        gamma=0.995,                # Discount factor
         gae_lambda=0.95,           # GAE smoothing
         clip_range=0.2,            # PPO clipping parameter
         n_epochs=10,               # Number of epochs per update

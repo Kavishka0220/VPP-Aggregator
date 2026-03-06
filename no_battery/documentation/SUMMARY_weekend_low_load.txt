@@ -1,0 +1,36 @@
+================================================================================
+NO-BATTERY SCENARIO ANALYSIS - weekend_low_load
+Generated: 2026-03-06 22:20:11
+================================================================================
+
+📊 ENERGY STATISTICS:
+  Total Load Energy:        227.19 kWh
+  Total Solar Energy:       182.47 kWh
+  Grid Import Energy:       138.55 kWh
+  Grid Export Energy:       93.83 kWh
+  Net Grid Energy:          44.71 kWh
+  Solar Self-Consumption:   48.6%
+
+⚡ POWER STATISTICS:
+  Peak Load:                22.83 kW
+  Peak Solar:               25.93 kW
+  Peak Grid Import:         22.83 kW
+  Peak Grid Export:         18.47 kW
+
+🔌 VOLTAGE STATISTICS:
+  Min Voltage:              0.9890 p.u.
+  Max Voltage:              1.0220 p.u.
+  Voltage Violations:       0 steps (0.0%)
+
+💰 ECONOMIC METRICS (Estimated):
+  Grid Import Cost:         $41.56
+  Export Revenue:           $9.38
+  Net Energy Cost:          $32.18
+
+================================================================================
+
+FILES GENERATED:
+  - no_battery_scenario_weekend_low_load.png
+  - no_battery_voltages_weekend_low_load.png
+  - no_battery_results_weekend_low_load.csv
+  - SUMMARY_weekend_low_load.txt (this file)

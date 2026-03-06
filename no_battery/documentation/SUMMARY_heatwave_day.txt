@@ -1,0 +1,35 @@
+================================================================================
+NO-BATTERY SCENARIO ANALYSIS - heatwave_day
+================================================================================
+
+📊 ENERGY STATISTICS:
+  Total Load Energy:        358.40 kWh
+  Total Solar Energy:       164.23 kWh
+  Grid Import Energy:       211.87 kWh
+  Grid Export Energy:       17.71 kWh
+  Net Grid Energy:          194.17 kWh
+  Solar Self-Consumption:   89.2%
+
+⚡ POWER STATISTICS:
+  Peak Load:                29.13 kW
+  Peak Solar:               23.34 kW
+  Peak Grid Import:         29.07 kW
+  Peak Grid Export:         7.49 kW
+
+🔌 VOLTAGE STATISTICS:
+  Min Voltage:              0.9861 p.u.
+  Max Voltage:              1.0230 p.u.
+  Voltage Violations:       0 steps (0.0%)
+
+💰 ECONOMIC METRICS (Estimated):
+  Grid Import Cost:         $63.56
+  Export Revenue:           $1.77
+  Net Energy Cost:          $61.79
+
+================================================================================
+
+FILES GENERATED:
+  - no_battery_scenario_heatwave_day.png
+  - no_battery_voltages_heatwave_day.png
+  - no_battery_results_heatwave_day.csv
+  - SUMMARY_heatwave_day.txt (this file)

@@ -1,0 +1,35 @@
+================================================================================
+NO-BATTERY SCENARIO ANALYSIS - daytime_peak_load_day
+================================================================================
+
+📊 ENERGY STATISTICS:
+  Total Load Energy:        302.03 kWh
+  Total Solar Energy:       182.47 kWh
+  Grid Import Energy:       166.79 kWh
+  Grid Export Energy:       47.23 kWh
+  Net Grid Energy:          119.56 kWh
+  Solar Self-Consumption:   74.1%
+
+⚡ POWER STATISTICS:
+  Peak Load:                25.97 kW
+  Peak Solar:               25.93 kW
+  Peak Grid Import:         25.97 kW
+  Peak Grid Export:         11.63 kW
+
+🔌 VOLTAGE STATISTICS:
+  Min Voltage:              0.9875 p.u.
+  Max Voltage:              1.0233 p.u.
+  Voltage Violations:       0 steps (0.0%)
+
+💰 ECONOMIC METRICS (Estimated):
+  Grid Import Cost:         $50.04
+  Export Revenue:           $4.72
+  Net Energy Cost:          $45.31
+
+================================================================================
+
+FILES GENERATED:
+  - no_battery_scenario_daytime_peak_load_day.png
+  - no_battery_voltages_daytime_peak_load_day.png
+  - no_battery_results_daytime_peak_load_day.csv
+  - SUMMARY_daytime_peak_load_day.txt (this file)

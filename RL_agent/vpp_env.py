@@ -614,7 +614,10 @@ class UrbanVPPEnv(gym.Env):
         final_power_array = np.array([self.node_battery_power_kw[node_idx] 
                                       for node_idx in self.storage_map])
         power_changes = final_power_array - prev_batt_power_copy
-        cycling_cost = -0.5 * np.sum(np.abs(power_changes)) 
+        
+        # INCREASED cycling penalty to reduce alternating behavior
+        # Linear penalty for any changes + quadratic penalty for large changes
+        cycling_cost = -2.0 * np.sum(np.abs(power_changes)) - 3.0 * np.sum(power_changes ** 2) 
         
         # D. SOC Health Penalty - Encourage keeping SOC in 0.2-0.8 range
         # This promotes battery longevity by avoiding deep discharge/overcharge

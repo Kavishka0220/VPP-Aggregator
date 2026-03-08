@@ -195,7 +195,7 @@ axes[0].grid(True, alpha=0.3)
 
 # Subplot 2: Battery Operations
 axes[1].set_title("Battery Power (Negative = Charging, Positive = Discharging)", fontsize=9, fontweight='bold')
-axes[1].plot(time_axis, history["bess_power"], color='#32CD32', linewidth=1.5, label='BESS (50kW)', alpha=0.8)
+axes[1].plot(time_axis, history["bess_power"], color='#32CD32', linewidth=1.5, label='BESS (40kW)', alpha=0.8)
 axes[1].plot(time_axis, history["hb1_power"], color='#A680F1', linestyle='--', linewidth=1.2, label='Home Battery 1 (5kW)')
 axes[1].plot(time_axis, history["hb2_power"], color='#BC14FF', linestyle=':', linewidth=1.2, label='Home Battery 2 (5kW)')
 axes[1].axhline(y=0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
@@ -207,7 +207,7 @@ axes[1].grid(True, alpha=0.3)
 
 # Subplot 3: Battery State of Charge
 axes[2].set_title("Battery State of Charge", fontsize=9, fontweight='bold')
-axes[2].plot(time_axis, history["soc_bess"], color='#32CD32', linewidth=1.8, label='BESS (100kWh)')
+axes[2].plot(time_axis, history["soc_bess"], color='#32CD32', linewidth=1.8, label='BESS (120kWh)')
 axes[2].plot(time_axis, history["soc_hb1"], color="#A680F1", linestyle='--', linewidth=1.5, label='Home Battery 1 (13.5kWh)')
 axes[2].plot(time_axis, history["soc_hb2"], color="#BC14FF", linestyle=':', linewidth=1.5, label='Home Battery 2 (13.5kWh)')
 axes[2].axhline(y=0.8, color='red', linestyle='--', linewidth=1, alpha=0.5, label='Upper Limit')

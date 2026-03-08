@@ -16,7 +16,7 @@ from vpp_env import UrbanVPPEnv
 # Set plotting style
 sns.set_style("whitegrid")
 plt.rcParams['figure.dpi'] = 150
-plt.rcParams['font.size'] = 10
+plt.rcParams['font.size'] = 8
 
 def plot_no_battery_scenario(scenario_name=None, num_steps=96):
     """
@@ -29,8 +29,12 @@ def plot_no_battery_scenario(scenario_name=None, num_steps=96):
     data_dir = os.path.join(parent_dir, 'data')
     docs_dir = os.path.join(parent_dir, 'documentation')
     
-    # Initialize environment
-    env = UrbanVPPEnv(data_path="../../data", scenario_name=scenario_name)
+    # Get workspace root (two levels up from script)
+    workspace_root = os.path.dirname(parent_dir)
+    vpp_data_path = os.path.join(workspace_root, 'data')
+    
+    # Initialize environment with absolute path
+    env = UrbanVPPEnv(data_path=vpp_data_path, scenario_name=scenario_name)
     obs, info = env.reset()
     
     # Storage for results
@@ -105,7 +109,7 @@ def plot_no_battery_scenario(scenario_name=None, num_steps=96):
     os.makedirs(docs_dir, exist_ok=True)
     
     # Create the plots
-    fig = plt.figure(figsize=(14, 9))
+    fig = plt.figure(figsize=(14, 6))
     
     # Color scheme
     color_solar = '#FFA500'  # Orange
@@ -114,8 +118,11 @@ def plot_no_battery_scenario(scenario_name=None, num_steps=96):
     color_grid_export = '#51CF66'  # Green
     color_voltage = '#9B59B6'  # Purple
     
+    # Add scenario name to title
+    scenario_title = f" - {scenario_name}" if scenario_name else ""
+    
     # ==================== PLOT 1: Power Generation and Consumption ====================
-    ax1 = plt.subplot(3, 1, 1)
+    ax1 = plt.subplot(2, 1, 1)
     ax1.fill_between(df['hour'], 0, df['total_solar'], 
                      color=color_solar, alpha=0.6, label='Solar Generation')
     ax1.fill_between(df['hour'], 0, df['total_load'], 
@@ -123,16 +130,16 @@ def plot_no_battery_scenario(scenario_name=None, num_steps=96):
     ax1.plot(df['hour'], df['total_solar'], color=color_solar, linewidth=1.5, alpha=0.8)
     ax1.plot(df['hour'], df['total_load'], color=color_load, linewidth=1.5, alpha=0.8)
     
-    ax1.set_ylabel('Power (kW)', fontsize=11, fontweight='bold')
-    ax1.set_title('Power Generation and Consumption (No Battery)', 
-                  fontsize=13, fontweight='bold', pad=15)
-    ax1.legend(loc='upper right', framealpha=0.9)
+    ax1.set_ylabel('Power (kW)', fontsize=9, fontweight='bold')
+    ax1.set_title(f'Power Generation and Consumption (No Battery){scenario_title}', 
+                  fontsize=10, fontweight='bold', pad=10)
+    ax1.legend(loc='upper left', bbox_to_anchor=(1.01, 1), framealpha=0.9, fontsize=8)
     ax1.grid(True, alpha=0.3)
     ax1.set_xlim(0, 24)
     ax1.set_ylim(bottom=0)
     
     # ==================== PLOT 2: Grid Power Exchange ====================
-    ax2 = plt.subplot(3, 1, 2)
+    ax2 = plt.subplot(2, 1, 2)
     
     # Plot import (positive) and export (negative)
     # Import: when grid_power > 0
@@ -149,30 +156,14 @@ def plot_no_battery_scenario(scenario_name=None, num_steps=96):
     ax2.plot(df['hour'], df['grid_power'], color='black', linewidth=1, alpha=0.5)
     ax2.axhline(y=0, color='black', linestyle='-', linewidth=0.8)
     
-    ax2.set_ylabel('Power (kW)', fontsize=11, fontweight='bold')
-    ax2.set_title('Grid Power Exchange', fontsize=13, fontweight='bold', pad=15)
-    ax2.legend(loc='upper right', framealpha=0.9)
+    ax2.set_xlabel('Time (Hours)', fontsize=9, fontweight='bold')
+    ax2.set_ylabel('Power (kW)', fontsize=9, fontweight='bold')
+    ax2.set_title(f'Grid Power Exchange (Positive = Import, Negative = Export){scenario_title}', fontsize=10, fontweight='bold', pad=10)
+    ax2.legend(loc='upper left', bbox_to_anchor=(1.01, 1), framealpha=0.9, fontsize=8)
     ax2.grid(True, alpha=0.3)
     ax2.set_xlim(0, 24)
-
-    # ==================== PLOT 3: Net Demand ====================
-    ax3 = plt.subplot(3, 1, 3)
     
-    ax3.plot(df['hour'], df['net_demand'], color='#E74C3C', linewidth=2, label='Net Demand (Load - Solar)')
-    ax3.fill_between(df['hour'], 0, df['net_demand'], 
-                     where=(df['net_demand'] > 0), color='#E74C3C', alpha=0.3, interpolate=True)
-    ax3.fill_between(df['hour'], 0, df['net_demand'], 
-                     where=(df['net_demand'] < 0), color='#2ECC71', alpha=0.3, interpolate=True)
-    ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.8)
-    
-    ax3.set_xlabel('Time (Hours)', fontsize=11, fontweight='bold')
-    ax3.set_ylabel('Power (kW)', fontsize=11, fontweight='bold')
-    ax3.set_title('Net Demand (Positive = Deficit, Negative = Surplus)', fontsize=13, fontweight='bold', pad=15)
-    ax3.legend(loc='upper right', framealpha=0.9)
-    ax3.grid(True, alpha=0.3)
-    ax3.set_xlim(0, 24)
-    
-    plt.tight_layout()
+    plt.subplots_adjust(left=0.058, bottom=0.094, right=0.875, top=0.92, wspace=0.2, hspace=0.353)
     
     # Save the plot
     scenario_suffix = f"_{scenario_name}" if scenario_name else ""
@@ -193,10 +184,10 @@ def plot_no_battery_scenario(scenario_name=None, num_steps=96):
     ax5.axhline(y=0.9, color='red', linestyle='--', linewidth=1.5, label='Lower Limit')
     ax5.axhline(y=1.0, color='green', linestyle=':', linewidth=1, alpha=0.5)
     
-    ax5.set_ylabel('Voltage (p.u.)', fontsize=11, fontweight='bold')
-    ax5.set_title('Voltage Profile - All Nodes (No Battery)', 
-                  fontsize=13, fontweight='bold', pad=15)
-    ax5.legend(loc='right', bbox_to_anchor=(1.12, 0.5), ncol=1, framealpha=0.9)
+    ax5.set_ylabel('Voltage (p.u.)', fontsize=9, fontweight='bold')
+    ax5.set_title(f'Voltage Profile - All Nodes (No Battery){scenario_title}', 
+                  fontsize=10, fontweight='bold', pad=10)
+    ax5.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), ncol=1, framealpha=0.9, fontsize=7)
     ax5.grid(True, alpha=0.3)
     ax5.set_xlim(0, 24)
     ax5.set_ylim(0.85, 1.15)
@@ -213,15 +204,15 @@ def plot_no_battery_scenario(scenario_name=None, num_steps=96):
     ax6.axhline(y=0.9, color='red', linestyle='--', linewidth=1.5, alpha=0.7)
     ax6.axhline(y=1.0, color='green', linestyle=':', linewidth=1, alpha=0.5)
     
-    ax6.set_xlabel('Time (Hours)', fontsize=11, fontweight='bold')
-    ax6.set_ylabel('Voltage (p.u.)', fontsize=11, fontweight='bold')
-    ax6.set_title('Voltage Range Across Network', fontsize=13, fontweight='bold', pad=15)
-    ax6.legend(loc='upper right', framealpha=0.9)
+    ax6.set_xlabel('Time (Hours)', fontsize=9, fontweight='bold')
+    ax6.set_ylabel('Voltage (p.u.)', fontsize=9, fontweight='bold')
+    ax6.set_title(f'Voltage Range Across Network{scenario_title}', fontsize=10, fontweight='bold', pad=10)
+    ax6.legend(loc='upper left', bbox_to_anchor=(1.01, 1), framealpha=0.9, fontsize=8)
     ax6.grid(True, alpha=0.3)
     ax6.set_xlim(0, 24)
     ax6.set_ylim(0.85, 1.15)
     
-    plt.tight_layout()
+    plt.subplots_adjust(left=0.058, bottom=0.094, right=0.875, top=0.92, wspace=0.2, hspace=0.353)
     
     voltage_plot_filename = f"no_battery_voltages{scenario_suffix}.png"
     voltage_plot_path = os.path.join(plots_dir, voltage_plot_filename)

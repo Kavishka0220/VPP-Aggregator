@@ -4,27 +4,27 @@ NO-BATTERY SCENARIO ANALYSIS - Default
 
 📊 ENERGY STATISTICS:
   Total Load Energy:        258.17 kWh
-  Total Solar Energy:       114.85 kWh
-  Grid Import Energy:       189.26 kWh
-  Grid Export Energy:       45.95 kWh
-  Net Grid Energy:          143.31 kWh
-  Solar Self-Consumption:   60.0%
+  Total Solar Energy:       118.67 kWh
+  Grid Import Energy:       189.02 kWh
+  Grid Export Energy:       49.53 kWh
+  Net Grid Energy:          139.50 kWh
+  Solar Self-Consumption:   58.3%
 
 ⚡ POWER STATISTICS:
   Peak Load:                25.94 kW
-  Peak Solar:               21.13 kW
+  Peak Solar:               18.88 kW
   Peak Grid Import:         25.94 kW
-  Peak Grid Export:         12.97 kW
+  Peak Grid Export:         11.57 kW
 
 🔌 VOLTAGE STATISTICS:
   Min Voltage:              0.9875 p.u.
-  Max Voltage:              1.0226 p.u.
+  Max Voltage:              1.0233 p.u.
   Voltage Violations:       0 steps (0.0%)
 
 💰 ECONOMIC METRICS (Estimated):
-  Grid Import Cost:         $56.78
-  Export Revenue:           $4.59
-  Net Energy Cost:          $52.18
+  Grid Import Cost:         $56.71
+  Export Revenue:           $4.95
+  Net Energy Cost:          $51.75
 
 ================================================================================
 

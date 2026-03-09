@@ -21,10 +21,15 @@ NO-BATTERY SCENARIO ANALYSIS - weekend_low_load
   Max Voltage:              1.0220 p.u.
   Voltage Violations:       0 steps (0.0%)
 
-💰 ECONOMIC METRICS (Estimated):
-  Grid Import Cost:         $41.56
-  Export Revenue:           $9.38
-  Net Energy Cost:          $32.18
+💰 ECONOMIC METRICS (Time-of-Use Pricing):
+  Grid Import Cost:         LKR 6963.40
+  Export Revenue:           LKR 1782.85
+  Net Energy Cost:          LKR 5180.55
+
+  Rate Structure (LKR/kWh):
+    Day (6am-6pm):    Buy=35, Sell=19
+    Peak (6pm-11pm):  Buy=67, Sell=45
+    Night (11pm-6am): Buy=21, Sell=0
 
 ================================================================================
 

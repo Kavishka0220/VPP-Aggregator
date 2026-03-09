@@ -1,6 +1,6 @@
 """
-Visualization script for no-battery scenario
-Generates plots similar to the RL agent results for comparison
+No-Battery Scenario Analysis and Visualization
+Simulates VPP operation without battery control and generates comprehensive analysis
 
 Available Scenarios:
     - "cloudy_reduced_solar"        : Solar reduced with variability
@@ -15,8 +15,10 @@ Available Scenarios:
     - "weekend_low_load"            : All loads scaled down
 
 Usage:
-    python plot_no_battery.py                      # Use default scenario
-    python plot_no_battery.py Next_Day_Forecast_21 # Use specific scenario
+    python plot_no_battery.py                       # Full analysis with plots
+    python plot_no_battery.py --no-plots            # Quick test (no visualization)
+    python plot_no_battery.py heatwave_day          # Specific scenario with plots
+    python plot_no_battery.py heatwave_day --no-plots  # Quick test specific scenario
 """
 import numpy as np
 import pandas as pd
@@ -24,6 +26,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import sys
 import os
+import argparse
 
 # Add RL_agent to path to import vpp_env
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'RL_agent'))
@@ -37,9 +40,26 @@ NUM_NODES = 11
 NUM_BATTERIES = 3
 DEFAULT_NUM_STEPS = 96  # 24 hours
 
-# Economic parameters
-IMPORT_COST_RATE = 0.30  # $/kWh
-EXPORT_REVENUE_RATE = 0.10  # $/kWh
+# Time-of-Use Pricing (LKR per kWh)
+def get_electricity_price(hour):
+    """
+    Get time-of-use electricity prices in LKR per kWh
+    
+    Args:
+        hour: Hour of the day (0-23)
+    
+    Returns:
+        tuple: (buy_price, sell_price) in LKR per kWh
+    """
+    if 6 <= hour < 18:         # Daytime / solar hours (6am-6pm)
+        buy_price, sell_price = 35, 19  # LKR per kWh
+    elif 18 <= hour < 23:      # Evening peak (6pm-11pm)
+        buy_price, sell_price = 67, 45  # LKR per kWh
+    else:                      # Night (11pm-6am)
+        buy_price, sell_price = 21, 0   # LKR per kWh
+    
+    return buy_price, sell_price
+
 
 # Plotting configuration
 sns.set_style("whitegrid")
@@ -346,13 +366,36 @@ def _print_summary_statistics(df, scenario_name=None):
     if overvoltage_count > 0:
         print(f"  ⚠️ Overvoltage Events:     {overvoltage_count} steps")
     
-    print(f"\n💰 Economic Metrics (Estimated):")
-    grid_cost = grid_import_energy * IMPORT_COST_RATE
-    export_revenue = grid_export_energy * EXPORT_REVENUE_RATE
-    net_cost = grid_cost - export_revenue
-    print(f"  Grid Import Cost:         ${grid_cost:.2f} (@ ${IMPORT_COST_RATE}/kWh)")
-    print(f"  Export Revenue:           ${export_revenue:.2f} (@ ${EXPORT_REVENUE_RATE}/kWh)")
-    print(f"  Net Energy Cost:          ${net_cost:.2f}")
+    # Economic metrics with time-of-use pricing
+    print(f"\n💰 Economic Metrics (Time-of-Use Pricing):")
+    
+    # Calculate costs based on time-of-use rates
+    total_import_cost_lkr = 0
+    total_export_revenue_lkr = 0
+    
+    for idx, row in df.iterrows():
+        hour = int(row['hour'])
+        buy_price, sell_price = get_electricity_price(hour)
+        
+        # Energy in this time step (kWh)
+        import_energy = row['grid_import'] * TIME_STEP_HOURS
+        export_energy = row['grid_export'] * TIME_STEP_HOURS
+        
+        # Calculate cost/revenue
+        total_import_cost_lkr += import_energy * buy_price
+        total_export_revenue_lkr += export_energy * sell_price
+    
+    net_cost_lkr = total_import_cost_lkr - total_export_revenue_lkr
+    
+    print(f"  Grid Import Cost:         LKR {total_import_cost_lkr:.2f}")
+    print(f"  Export Revenue:           LKR {total_export_revenue_lkr:.2f}")
+    print(f"  Net Energy Cost:          LKR {net_cost_lkr:.2f}")
+    
+    # Show rate breakdown
+    print(f"\n  Rate Structure (LKR/kWh):")
+    print(f"    Day (6am-6pm):    Buy=35, Sell=19")
+    print(f"    Peak (6pm-11pm):  Buy=67, Sell=45")
+    print(f"    Night (11pm-6am): Buy=21, Sell=0")
 
 
 def _save_summary_file(df, scenario_name, scenario_suffix, docs_dir, plot_filename, voltage_plot_filename, csv_filename):
@@ -363,9 +406,21 @@ def _save_summary_file(df, scenario_name, scenario_suffix, docs_dir, plot_filena
     grid_import_energy = df['grid_import'].sum() * TIME_STEP_HOURS
     grid_export_energy = df['grid_export'].sum() * TIME_STEP_HOURS
     net_grid_energy = df['grid_power'].sum() * TIME_STEP_HOURS
-    grid_cost = grid_import_energy * IMPORT_COST_RATE
-    export_revenue = grid_export_energy * EXPORT_REVENUE_RATE
-    net_cost = grid_cost - export_revenue
+    
+    # Calculate time-of-use pricing
+    total_import_cost_lkr = 0
+    total_export_revenue_lkr = 0
+    
+    for idx, row in df.iterrows():
+        hour = int(row['hour'])
+        buy_price, sell_price = get_electricity_price(hour)
+        import_energy = row['grid_import'] * TIME_STEP_HOURS
+        export_energy = row['grid_export'] * TIME_STEP_HOURS
+        total_import_cost_lkr += import_energy * buy_price
+        total_export_revenue_lkr += export_energy * sell_price
+    
+    net_cost_lkr = total_import_cost_lkr - total_export_revenue_lkr
+    
     violation_steps = (df['voltage_violations'] > 0).sum()
     violation_pct = (violation_steps / len(df)) * 100
     undervoltage_count = (df['min_voltage'] < VOLTAGE_LOWER_LIMIT).sum()
@@ -407,10 +462,14 @@ def _save_summary_file(df, scenario_name, scenario_suffix, docs_dir, plot_filena
         if overvoltage_count > 0:
             f.write(f"  ⚠️ Overvoltage Events:     {overvoltage_count} steps\n")
         
-        f.write(f"\n💰 ECONOMIC METRICS (Estimated):\n")
-        f.write(f"  Grid Import Cost:         ${grid_cost:.2f}\n")
-        f.write(f"  Export Revenue:           ${export_revenue:.2f}\n")
-        f.write(f"  Net Energy Cost:          ${net_cost:.2f}\n")
+        f.write(f"\n💰 ECONOMIC METRICS (Time-of-Use Pricing):\n")
+        f.write(f"  Grid Import Cost:         LKR {total_import_cost_lkr:.2f}\n")
+        f.write(f"  Export Revenue:           LKR {total_export_revenue_lkr:.2f}\n")
+        f.write(f"  Net Energy Cost:          LKR {net_cost_lkr:.2f}\n")
+        f.write(f"\n  Rate Structure (LKR/kWh):\n")
+        f.write(f"    Day (6am-6pm):    Buy=35, Sell=19\n")
+        f.write(f"    Peak (6pm-11pm):  Buy=67, Sell=45\n")
+        f.write(f"    Night (11pm-6am): Buy=21, Sell=0\n")
         
         f.write("\n" + "="*80 + "\n")
         f.write("\nFILES GENERATED:\n")
@@ -423,22 +482,61 @@ def _save_summary_file(df, scenario_name, scenario_suffix, docs_dir, plot_filena
 
 
 if __name__ == "__main__":
-    # Default scenario (matches train.py)
-    DEFAULT_SCENARIO = "weekend_low_load"
+    # ============================================================================
+    # CHANGE DEFAULT SCENARIO HERE:
+    # ============================================================================
+    DEFAULT_SCENARIO = "Next_Day_Forecast_21"  # <-- Edit this to change scenario
+    # ============================================================================
     
-    # Allow command-line argument for scenario selection
-    if len(sys.argv) > 1:
-        scenario = sys.argv[1]
-        print(f"Running scenario from command line: {scenario}")
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description='Run no-battery scenario analysis with optional visualization',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python plot_no_battery.py                       # Full analysis with plots
+  python plot_no_battery.py --no-plots            # Quick test only (faster)
+  python plot_no_battery.py heatwave_day          # Specific scenario with plots
+  python plot_no_battery.py heatwave_day --no-plots  # Quick test specific scenario
+
+Available scenarios:
+  Next_Day_Forecast_21, heatwave_day, solar_unavailable_day,
+  cloudy_reduced_solar, intermittent_solar_dropouts, weekend_low_load,
+  daytime_peak_load_day, evening_peak_load_day, load_higher_day,
+  solar_shifted_late
+        """
+    )
+    
+    parser.add_argument('scenario', nargs='?', default=DEFAULT_SCENARIO,
+                        help=f'Scenario name (default: {DEFAULT_SCENARIO})')
+    parser.add_argument('--no-plots', action='store_true',
+                        help='Skip plot generation (faster, testing only)')
+    parser.add_argument('--no-show', action='store_true',
+                        help='Save plots but don\'t display them')
+    
+    args = parser.parse_args()
+    
+    # Determine plot settings
+    save_plots = not args.no_plots
+    show_plots = not args.no_plots and not args.no_show
+    
+    # Display mode
+    if args.no_plots:
+        print(f"Running scenario: {args.scenario} [QUICK TEST MODE - No plots]")
     else:
-        scenario = DEFAULT_SCENARIO
-        print(f"Running default scenario: {scenario}")
-        print("(Use: python plot_no_battery.py <scenario_name> to test other scenarios)")
+        print(f"Running scenario: {args.scenario} [Full analysis with plots]")
     
-    # Run the visualization
-    df = plot_no_battery_scenario(scenario_name=scenario)
+    # Run the analysis
+    df = plot_no_battery_scenario(
+        scenario_name=args.scenario,
+        save_plots=save_plots,
+        show_plots=show_plots
+    )
     
     print(f"\n{'='*80}")
-    print("✓ Visualization completed successfully!")
+    if args.no_plots:
+        print("✓ Quick test completed!")
+    else:
+        print("✓ Full analysis completed!")
     print(f"{'='*80}\n")
     

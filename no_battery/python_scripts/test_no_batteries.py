@@ -1,4 +1,11 @@
 """
+⚠️ DEPRECATED: Use plot_no_battery.py instead
+This script is kept for backward compatibility only.
+
+For new work, use: python plot_no_battery.py --no-plots
+(Same functionality, better maintained)
+
+---
 Test script to run the VPP environment without battery actions
 This simulates the feeder behavior with only loads and solar generation
 
@@ -33,6 +40,26 @@ VOLTAGE_UPPER_LIMIT = 1.1
 TIME_STEP_HOURS = 0.25  # 15-minute intervals
 NUM_NODES = 11
 NUM_BATTERIES = 3
+
+# Time-of-Use Pricing (LKR per kWh)
+def get_electricity_price(hour):
+    """
+    Get time-of-use electricity prices in LKR per kWh
+    
+    Args:
+        hour: Hour of the day (0-23)
+    
+    Returns:
+        tuple: (buy_price, sell_price) in LKR per kWh
+    """
+    if 6 <= hour < 18:         # Daytime / solar hours (6am-6pm)
+        buy_price, sell_price = 35, 19  # LKR per kWh
+    elif 18 <= hour < 23:      # Evening peak (6pm-11pm)
+        buy_price, sell_price = 67, 45  # LKR per kWh
+    else:                      # Night (11pm-6am)
+        buy_price, sell_price = 21, 0   # LKR per kWh
+    
+    return buy_price, sell_price
 
 def test_feeder_without_batteries(scenario_name=None, num_steps=96, verbose=True):
     """
@@ -99,7 +126,10 @@ def test_feeder_without_batteries(scenario_name=None, num_steps=96, verbose=True
         # Extract data from info
         total_load = info.get('total_load', 0)
         total_solar = info.get('total_solar', 0)
-        grid_power = info.get('grid_power', 0)
+        
+        # Calculate grid power manually: Load - Solar (no batteries active)
+        # Positive = importing from grid, Negative = exporting to grid
+        grid_power = total_load - total_solar
         
         results['step'].append(step)
         results['hour'].append(step * TIME_STEP_HOURS)
@@ -223,18 +253,36 @@ def _print_summary_statistics(df, scenario_name=None):
         print(f"  ⚠️ Overvoltage Events:     {overvoltage_count} steps ({overvoltage_count/len(df)*100:.1f}%)")
         print(f"     Maximum Voltage:       {df['max_voltage'].max():.4f} p.u.")
     
-    # Economic metrics (estimated)
-    print(f"\n💰 Economic Metrics (Estimated):")
-    import_cost_rate = 0.30  # $/kWh
-    export_revenue_rate = 0.10  # $/kWh
+    # Economic metrics with time-of-use pricing
+    print(f"\n💰 Economic Metrics (Time-of-Use Pricing):")
     
-    grid_import_cost = grid_import_energy * import_cost_rate
-    grid_export_revenue = grid_export_energy * export_revenue_rate
-    net_cost = grid_import_cost - grid_export_revenue
+    # Calculate costs based on time-of-use rates
+    total_import_cost_lkr = 0
+    total_export_revenue_lkr = 0
     
-    print(f"  Grid Import Cost:         ${grid_import_cost:.2f} (@ ${import_cost_rate}/kWh)")
-    print(f"  Export Revenue:           ${grid_export_revenue:.2f} (@ ${export_revenue_rate}/kWh)")
-    print(f"  Net Energy Cost:          ${net_cost:.2f}")
+    for idx, row in df.iterrows():
+        hour = int(row['hour'])
+        buy_price, sell_price = get_electricity_price(hour)
+        
+        # Energy in this time step (kWh)
+        import_energy = row['grid_import'] * TIME_STEP_HOURS
+        export_energy = row['grid_export'] * TIME_STEP_HOURS
+        
+        # Calculate cost/revenue
+        total_import_cost_lkr += import_energy * buy_price
+        total_export_revenue_lkr += export_energy * sell_price
+    
+    net_cost_lkr = total_import_cost_lkr - total_export_revenue_lkr
+    
+    print(f"\n  Grid Import Cost:         LKR {total_import_cost_lkr:.2f}")
+    print(f"  Export Revenue:           LKR {total_export_revenue_lkr:.2f}")
+    print(f"  Net Energy Cost:          LKR {net_cost_lkr:.2f}")
+    
+    # Show rate breakdown
+    print(f"\n  Rate Structure (LKR/kWh):")
+    print(f"    Day (6am-6pm):    Buy=35, Sell=19")
+    print(f"    Peak (6pm-11pm):  Buy=67, Sell=45")
+    print(f"    Night (11pm-6am): Buy=21, Sell=0")
     
     # Performance summary
     print(f"\n📝 Performance Summary:")
@@ -260,8 +308,7 @@ if __name__ == "__main__":
         print(f"Running scenario from command line: {scenario}")
     else:
         scenario = DEFAULT_SCENARIO
-        print(f"Running default scenario: {scenario}")
-        print("(Use: python test_no_batteries.py <scenario_name> to test other scenarios)")
+        print(f"Running scenario: {scenario}")
     
     # Run the test
     df = test_feeder_without_batteries(scenario_name=scenario)

@@ -39,7 +39,7 @@ def main():
 
     # Set to a scenario name (e.g., "heatwave_day") to train on that specific scenario.
     # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
-    scenario_name = "Next_Day_Forecast_21"  # Change to desired scenario or None for default
+    scenario_name = "weekend_low_load"  # Change to desired scenario or None for default
 
 
     

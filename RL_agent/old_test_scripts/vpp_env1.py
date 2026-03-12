@@ -17,7 +17,7 @@ class UrbanVPPEnv(gym.Env):
     """
     Final Thesis VPP Environment
     - Constraints: Voltage must be between 0.9 and 1.1 p.u.
-    - Inputs: Common Solar, 10 Loads, 6 PCC Voltages, 3 SoCs, Time.
+    - Inputs: Common Solar, 10 Loads, 11 Node Voltages, 3 SoCs, Time.
     """
     
     metadata = {'render_modes': []}
@@ -31,15 +31,16 @@ class UrbanVPPEnv(gym.Env):
         # Initialize OpenDSS Runner
         dss_file = os.path.join(parent_dir, "openDSS", "feeder_houses.dss")
         self.dss_runner = VPPDSSRunner(dss_file)
+        self.dss_runner.compile()  # Compile circuit at initialization
 
         # --- 1. SYSTEM CONFIGURATION ---
-        self.n_nodes = 11 # 0 to 9 (Houses) + 10 (BESS Node)
-        self.solar_indices = [0, 1, 2, 4, 6, 8] # Which nodes have Solar? (0, 1, 2, 4, 6, 8)
+        self.n_nodes = 11  # 10 Houses (0-9) + 1 BESS Node (10)
+        self.solar_indices = [0, 1, 2, 4, 6, 8]  # Which house nodes have solar panels
         # Which nodes have Batteries?
-        self.home_batt_indices = [0, 2] # Home Batteries at 0 & 2
-        self.bess_index = 10 # BESS at 10
+        self.home_batt_indices = [0, 2]  # Home Batteries at nodes 0 & 2
+        self.bess_index = 10  # BESS at node 10
         
-        # Map actions to physical nodes: Action[0]->Node0, Action[1]->Node2, Action[2]->Node6
+        # Map actions to physical nodes: Action[0]->Node0, Action[1]->Node2, Action[2]->Node10(BESS)
         self.storage_map = self.home_batt_indices + [self.bess_index]
         self.n_storage_units = 3
 
@@ -59,8 +60,8 @@ class UrbanVPPEnv(gym.Env):
         )
 
         # --- 3. OBSERVATION SPACE ---
-        # 1(Solar) + 10(Loads) + 6(PCC Voltages) + 3(SoCs) + 4(Time) = 24
-        self.obs_size = 24
+        # 1(Solar) + 10(Loads) + 11(All Node Voltages) + 3(SoCs) + 4(Time) = 29
+        self.obs_size = 29
         self.observation_space = spaces.Box(
             #low=-np.inf, high=np.inf,
             low=-5, high=5,
@@ -73,8 +74,10 @@ class UrbanVPPEnv(gym.Env):
         self.max_steps = 96
         self.soc = np.ones(3) * 0.5 
         self.prev_batt_power = np.zeros(3)
-        # We need 11 voltage values internally
-        self.voltages = np.ones(self.n_nodes, dtype=np.float32) # Store all voltages internally
+        # We need 11 voltage values internally (for 3-phase monitoring)
+        self.voltages = np.ones(self.n_nodes, dtype=np.float32)      # Min voltage per bus (RL sees this)
+        self.voltages_min = np.ones(self.n_nodes, dtype=np.float32)  # For undervoltage checking
+        self.voltages_max = np.ones(self.n_nodes, dtype=np.float32)  # For overvoltage checking
 
         # --- LOAD DATA ---
         try:
@@ -88,7 +91,48 @@ class UrbanVPPEnv(gym.Env):
                 self.solar_df = pd.read_csv(f"{data_path}/solar_forecast_formatted.csv")
                 self.load_df = pd.read_csv(f"{data_path}/load_forecast.csv")
             
-            # Validate data shape
+            # Clean and validate data - handle various CSV formats
+            # Process solar dataframe
+            # Drop timestamp/date columns
+            timestamp_cols = [col for col in self.solar_df.columns if col.lower() in ['timestamp', 'time', 'date', 'datetime']]
+            if timestamp_cols:
+                self.solar_df = self.solar_df.drop(columns=timestamp_cols)
+            
+            # Convert all columns to numeric
+            for col in self.solar_df.columns:
+                self.solar_df[col] = pd.to_numeric(self.solar_df[col], errors='coerce')
+            
+            # Drop any completely empty columns
+            self.solar_df = self.solar_df.dropna(axis=1, how='all')
+            
+            # Select only first 10 columns if more exist
+            if self.solar_df.shape[1] > 10:
+                print(f"[WARNING] solar has {self.solar_df.shape[1]} columns, using first 10")
+                self.solar_df = self.solar_df.iloc[:, :10]
+            elif self.solar_df.shape[1] < 10:
+                raise ValueError(f"solar has only {self.solar_df.shape[1]} columns, need 10")
+            
+            # Process load dataframe
+            # Drop timestamp/date columns
+            timestamp_cols = [col for col in self.load_df.columns if col.lower() in ['timestamp', 'time', 'date', 'datetime']]
+            if timestamp_cols:
+                self.load_df = self.load_df.drop(columns=timestamp_cols)
+            
+            # Convert all columns to numeric
+            for col in self.load_df.columns:
+                self.load_df[col] = pd.to_numeric(self.load_df[col], errors='coerce')
+            
+            # Drop any completely empty columns
+            self.load_df = self.load_df.dropna(axis=1, how='all')
+            
+            # Select only first 10 columns if more exist
+            if self.load_df.shape[1] > 10:
+                print(f"[WARNING] load has {self.load_df.shape[1]} columns, using first 10")
+                self.load_df = self.load_df.iloc[:, :10]
+            elif self.load_df.shape[1] < 10:
+                raise ValueError(f"load has only {self.load_df.shape[1]} columns, need 10")
+            
+            # Final validation
             if self.solar_df.shape[1] != 10 or self.load_df.shape[1] != 10:
                 raise ValueError(f"Data must have 10 columns. Got solar: {self.solar_df.shape[1]}, load: {self.load_df.shape[1]}")
             
@@ -143,7 +187,10 @@ class UrbanVPPEnv(gym.Env):
         #self.soc = np.random.uniform(0.3, 0.7, size=3)
         self.soc = np.full(3, 0.2)
         self.prev_batt_power = np.zeros(self.n_storage_units)
-        self.voltages = np.ones(self.n_nodes, dtype=np.float32) # Reset voltages to 1.0
+        # Reset voltages to 1.0 p.u. (nominal)
+        self.voltages = np.ones(self.n_nodes, dtype=np.float32)
+        self.voltages_min = np.ones(self.n_nodes, dtype=np.float32)
+        self.voltages_max = np.ones(self.n_nodes, dtype=np.float32)
         
         # Pick random day or use provided start index
         if options is not None and "start_step" in options:
@@ -153,7 +200,7 @@ class UrbanVPPEnv(gym.Env):
             print(f"[CONFIG] Starting at step {self.start_idx}, length {self.max_steps}")
         elif self.default_start_index is not None:
              self.start_idx = self.default_start_index
-             # print(f"[CONFIG] Starting at FIXED default step {self.start_idx}")
+             print(f"[CONFIG] Starting at FIXED default step {self.start_idx}")
         else:
             max_start = len(self.solar_df) - self.max_steps
             if max_start > 0:
@@ -208,8 +255,9 @@ class UrbanVPPEnv(gym.Env):
             charge_intensity = min(1.0, net_solar_surplus / self.bess_power)
             action_modified[bess_action_idx] = -charge_intensity  # Negative = charging
         
-        # Strategy 2: Predictive charging from grid during cheap night rates (0-6am, 21 LKR)
+        # Strategy 2: Predictive charging from grid during cheap night rates (12am-6am, 21 LKR)
         # Calculate if today's solar surplus will be sufficient to fully charge BESS
+        # NOTE: Charging blocked between 11pm-12am
         elif hour < 6:
             # Look ahead to predict today's solar surplus
             steps_remaining = self.max_steps - self.current_step
@@ -242,8 +290,14 @@ class UrbanVPPEnv(gym.Env):
                     
                     if energy_deficit > 5.0:  # More than 5 kWh deficit
                         # Solar won't be enough - charge from grid at night
-                        # Calculate remaining night hours for charging (0-6am = up to 24 steps)
-                        steps_until_6am = int((6 - hour) * 4)
+                        # Calculate remaining night hours for charging (11pm-6am = up to 28 steps)
+                        if hour >= 23:
+                            # From 11pm to midnight + midnight to 6am
+                            steps_until_6am = int((24 - hour) * 4 + 6 * 4)
+                        else:
+                            # Already past midnight, just count to 6am
+                            steps_until_6am = int((6 - hour) * 4)
+                        
                         if steps_until_6am > 0:
                             # Spread deficit charging across remaining night hours
                             power_per_step = energy_deficit / (steps_until_6am * 0.25)
@@ -260,6 +314,12 @@ class UrbanVPPEnv(gym.Env):
                         action_modified[bess_action_idx] = -1.0  # Full charge
                     else:
                         action_modified[bess_action_idx] = -0.7  # High charge
+            else:
+                # Insufficient lookahead data - fallback to SoC-based charging
+                if bess_soc < 0.4:
+                    action_modified[bess_action_idx] = -0.8  # Strong charge when low
+                elif bess_soc < 0.6:
+                    action_modified[bess_action_idx] = -0.5  # Moderate charge
         
         # --- 2. PHYSICS: APPLY ACTIONS ---
         # Create an array of size 11 for the grid physics
@@ -285,12 +345,13 @@ class UrbanVPPEnv(gym.Env):
                 desired_power = 0.0  # Prevent charging when battery full
 
             # --- CONSTRAINT 2: BESS CHARGING STRATEGY ---
-            # BESS prefers solar but can use cheap night grid power (0-6am)
+            # BESS prefers solar but can use cheap night grid power (12am-6am)
             # to ensure sufficient charge for evening peak
+            # NOTE: Charging blocked between 11pm-12am (hour 23-24)
             if is_bess and desired_power < 0:  # BESS trying to charge
-                # Allow charging if: (1) solar surplus available, OR (2) cheap night hours
-                if net_solar_surplus <= 0 and hour >= 6:
-                    desired_power = 0.0  # Block grid charging outside night hours
+                # Allow charging if: (1) solar surplus available, OR (2) cheap night hours (12am-6am)
+                if net_solar_surplus <= 0 and (6 <= hour or hour >= 23):
+                    desired_power = 0.0  # Block grid charging outside night hours and during 11pm-12am
             
             # --- CONSTRAINT 3: Home Battery Daytime Solar Charging ---
             # Home batteries prefer solar during daytime but can use grid at night
@@ -298,6 +359,10 @@ class UrbanVPPEnv(gym.Env):
             if not is_bess and 6 <= hour < 18 and desired_power < 0:
                 if net_solar_surplus <= 0:  # No solar surplus available
                     desired_power = 0.0  # Block daytime grid charging for home batteries
+            
+            # --- CONSTRAINT 4: Block all battery charging between 11pm-12am ---
+            if 23 <= hour < 24 and desired_power < 0:
+                desired_power = 0.0  # No charging allowed between 11pm-12am
             
             # Limit discharge to actual remaining demand
             if desired_power > 0:
@@ -352,22 +417,22 @@ class UrbanVPPEnv(gym.Env):
             pv_kw=pv_kw,
             batt_home0_kw=batt0,
             batt_home2_kw=batt2,
-            bess_kw=bess
+            bess_kw=bess,
+            auto_compile=False
         )
         
-        # Map OpenDSS voltages to self.voltages (indices 0-10)
-        name_to_idx = {f"N{i}": i for i in range(10)}
-        name_to_idx["NBESS"] = 10
+        # Voltages are now in fixed order: N0, N1, ..., N9, NBESS (indices 0-10)
+        # Store min voltage for observations (RL agent sees this)
+        self.voltages = np.array(step_res.vmin_pu_by_bus, dtype=np.float32)
         
-        new_voltages = np.ones(self.n_nodes, dtype=np.float32)
-        for bus_name, v_pu in zip(step_res.buses, step_res.vmag_pu):
-            bus_name_upper = bus_name.upper()
-            if bus_name_upper in name_to_idx:
-                idx = name_to_idx[bus_name_upper]
-                new_voltages[idx] = v_pu
+        # For penalty calculation, check both min and max across 3 phases
+        self.voltages_min = self.voltages.copy()
+        self.voltages_max = np.zeros(self.n_nodes, dtype=np.float32)
         
-        self.voltages = new_voltages
-        voltages_for_penalty = self.voltages.copy()
+        # Calculate max voltage per bus from 3-phase data
+        for i, (va, vb, vc) in enumerate(step_res.vabc_pu_by_bus):
+            phases = [v for v in [va, vb, vc] if not np.isnan(v)]
+            self.voltages_max[i] = max(phases) if phases else 1.0
         
         # --- 4. REWARD CALCULATION ---
         # A. Economic Profit
@@ -447,11 +512,12 @@ class UrbanVPPEnv(gym.Env):
                 # STRONG incentive to discharge at peak prices (67 LKR)
                 evening_peak_bonus = 10.0 * total_discharge_power
         
-        # ----- SECTION 3: NIGHT (11pm-6am) -----
+        # ----- SECTION 3: NIGHT (12am-6am) -----
         # Strategy: HOME batteries and BESS can charge at cheap rates (21 LKR)
         # BESS charges at night to supplement insufficient solar generation
+        # NOTE: Charging blocked between 11pm-12am
         night_charge_bonus = 0.0
-        if hour < 6 or hour >= 24:  # Night hours
+        if hour < 6:  # Night hours (12am-6am only)
             # HOME BATTERY CHARGING
             home_batt_soc = [self.soc[0], self.soc[1]]  # Home batteries only
             if np.mean(home_batt_soc) < 0.7:  # Room to charge
@@ -523,19 +589,21 @@ class UrbanVPPEnv(gym.Env):
                         night_charge_bonus += -10.0 * bess_charge_power
 
         # B. Voltage Violation Penalty (0.9 to 1.1 p.u. limits)
-        # Monitor all nodes for grid safety compliance
+        # Monitor all nodes for grid safety compliance (3-phase aware)
         critical_nodes = list(range(10)) + [self.bess_index]
 
-        pcc_voltages = voltages_for_penalty[critical_nodes]
-
-        # Calculate how far we are outside the safe zone
-        # Logic: max(0, V - 1.1) + max(0, 0.9 - V)
-        over_voltage = np.maximum(0, pcc_voltages - 1.1)
-        under_voltage = np.maximum(0, 0.9 - pcc_voltages)
+        # Check undervoltage: min voltage per bus should be >= 0.9
+        min_voltages = self.voltages_min[critical_nodes]
+        under_voltage = np.maximum(0, 0.9 - min_voltages)
+        
+        # Check overvoltage: max voltage per bus should be <= 1.1
+        max_voltages = self.voltages_max[critical_nodes]
+        over_voltage = np.maximum(0, max_voltages - 1.1)
         
         total_violation = np.sum(over_voltage + under_voltage)
         
         # Heavy Penalty: -100 per unit of violation
+        # Example: 0.01 p.u. deviation → -1 penalty
         # Example: 0.01 p.u. deviation → -1 penalty
         # voltage_penalty = -100.0 * total_violation
         voltage_penalty = -50.0 * (total_violation ** 2)
@@ -546,7 +614,10 @@ class UrbanVPPEnv(gym.Env):
         final_power_array = np.array([self.node_battery_power_kw[node_idx] 
                                       for node_idx in self.storage_map])
         power_changes = final_power_array - prev_batt_power_copy
-        cycling_cost = -0.5 * np.sum(np.abs(power_changes)) 
+        
+        # INCREASED cycling penalty to reduce alternating behavior
+        # Linear penalty for any changes + quadratic penalty for large changes
+        cycling_cost = -2.0 * np.sum(np.abs(power_changes)) - 3.0 * np.sum(power_changes ** 2) 
         
         # D. SOC Health Penalty - Encourage keeping SOC in 0.2-0.8 range
         # This promotes battery longevity by avoiding deep discharge/overcharge
@@ -586,8 +657,8 @@ class UrbanVPPEnv(gym.Env):
             "hour": hour,
             "net_demand": net_demand,
             "remaining_demand": self.remaining_demand,
-            "max_voltage": np.max(pcc_voltages),
-            "min_voltage": np.min(pcc_voltages),
+            "max_voltage": np.max(max_voltages),  # Max across all phases and buses
+            "min_voltage": np.min(min_voltages),  # Min across all phases and buses
             "violation": total_violation,
             "solar_surplus": net_solar_surplus,
             "total_load": total_load,
@@ -611,14 +682,14 @@ class UrbanVPPEnv(gym.Env):
         return obs, float(reward), terminated, truncated, info
 
     def _get_obs(self):
-        """Constructs the exact 24-value input vector for the RL agent.
+        """Constructs the exact 29-value input vector for the RL agent.
         
         Observation Structure:
         - [0]:     Common solar forecast (kW)
         - [1-10]:  Load forecasts for Houses 0-9 (kW)
-        - [11-16]: Voltages at solar nodes [0,1,2,4,6,8] (p.u.)
-        - [17-19]: Battery SoCs [Home0, Home2, BESS] (0-1)
-        - [20-23]: Time features [sin(time), cos(time), sin(day), cos(day)]
+        - [11-21]: Voltages at ALL nodes [0,1,2,3,4,5,6,7,8,9,BESS] (p.u.)
+        - [22-24]: Battery SoCs [Home0, Home2, BESS] (0-1)
+        - [25-28]: Time features [sin(time), cos(time), sin(day), cos(day)]
         """
         
         # 1. Common Solar Forecast (1 Value)
@@ -634,9 +705,9 @@ class UrbanVPPEnv(gym.Env):
         # 2. Load Forecasts (10 Values)
         # Already extracted as load_step above
         
-        # 3. Solar PCC Voltages (6 Values) - CRITICAL INPUT
-        # Only voltages at nodes with solar panels
-        pcc_voltages = self.voltages[self.solar_indices]
+        # 3. All Node Voltages (11 Values) - CRITICAL INPUT
+        # Complete grid visibility: Houses 0-9 + BESS node
+        all_voltages = self.voltages
 
         # 4. Battery States of Charge (3 Values)
         # Already stored in self.soc
@@ -651,11 +722,11 @@ class UrbanVPPEnv(gym.Env):
             np.sin(day_angle),  np.cos(day_angle)
         ])
 
-        # 6. Pack State Vector (Total: 24 values)
+        # 6. Pack State Vector (Total: 29 values)
         self.state = np.concatenate([
             common_solar,    # 1
             load_step,       # 10
-            pcc_voltages,    # 6 (The Agent sees these!)
+            all_voltages,    # 11 (Complete grid visibility!)
             self.soc,        # 3
             date_time_feats  # 4
         ]).astype(np.float32)

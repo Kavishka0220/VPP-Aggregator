@@ -9,9 +9,9 @@ import opendssdirect as dss
 
 DSS_PATH = Path(r"D:\UoM\FYP\VPP-Aggregator\openDSS\feeder_houses.dss")
 
-SOLAR_INDICES = [0, 1, 2, 4, 6, 8]
-LOAD_COUNT = 10
-BUS_NAMES_ORDERED = [f"N{i}" for i in range(10)] + ["NBESS"]  # fixed order for RL
+SOLAR_INDICES = [3, 5, 7, 10, 11, 13, 15, 17, 18, 19, 20]
+LOAD_COUNT = 21
+BUS_NAMES_ORDERED = [f"N{i}" for i in range(21)] + ["NBESS"]  # fixed order for RL
 
 
 @dataclass
@@ -82,9 +82,10 @@ class VPPDSSRunner:
             # keep kvar=0 unless you intentionally want Volt-VAR control etc.
             dss.Command(f"edit generator.PV{idx} kw={p} kvar=0")
 
-    def set_storage_kw(self, batt0_kw: float, batt2_kw: float, bess_kw: float) -> None:
-        self._set_one_storage("Batt0", batt0_kw)
-        self._set_one_storage("Batt2", batt2_kw)
+    def set_storage_kw(self, batt_home3_kw: float, batt_home5_kw: float, bess_kw: float) -> None:
+        """Set battery power at nodes 3, 5, and BESS."""
+        self._set_one_storage("Batt3", batt_home3_kw)
+        self._set_one_storage("Batt5", batt_home5_kw)
         self._set_one_storage("BESS",  bess_kw)
 
     def _set_one_storage(self, name: str, p_kw: float) -> None:
@@ -151,19 +152,28 @@ class VPPDSSRunner:
         self,
         loads_kw: List[float],
         pv_kw: Dict[int, float],
-        batt_home0_kw: float,
-        batt_home2_kw: float,
+        batt_home3_kw: float,
+        batt_home5_kw: float,
         bess_kw: float,
         loads_kvar: Optional[List[float]] = None,
         auto_compile: bool = True,
     ) -> StepResult:
+        """Run one simulation step with given loads, PV, and battery powers.
+        
+        Args:
+            loads_kw: List of 21 load powers (kW)
+            pv_kw: Dict mapping node index to PV power (kW)
+            batt_home3_kw: Home battery power at node 3 (kW, +discharge/-charge)
+            batt_home5_kw: Home battery power at node 5 (kW, +discharge/-charge)
+            bess_kw: BESS power (kW, +discharge/-charge)
+        """
 
         if auto_compile and not self._compiled:
             self.compile()
 
         self.set_loads(loads_kw, loads_kvar=loads_kvar)
         self.set_pv_kw(pv_kw)
-        self.set_storage_kw(batt_home0_kw, batt_home2_kw, bess_kw)
+        self.set_storage_kw(batt_home3_kw, batt_home5_kw, bess_kw)
 
         converged = self.solve()
 
@@ -191,10 +201,13 @@ class VPPDSSRunner:
 if __name__ == "__main__":
     runner = VPPDSSRunner(DSS_PATH)
 
-    loads_kw = [5, 4, 6, 3, 5, 4, 6, 3, 4, 5]
-    pv_kw = {0: 2.0, 1: 1.5, 2: 2.2, 4: 1.0, 6: 1.8, 8: 1.2}
+    # 21 loads (L0-L20)
+    loads_kw = [5, 4, 6, 3, 5, 4, 6, 3, 4, 5, 5, 4, 6, 3, 5, 4, 6, 3, 4, 5, 4]
+    
+    # Solar at indices [3, 5, 7, 10, 11, 13, 15, 17, 18, 19, 20]
+    pv_kw = {3: 2.0, 5: 1.5, 7: 2.2, 10: 1.0, 11: 1.8, 13: 1.2, 15: 2.5, 17: 1.9, 18: 2.1, 19: 1.7, 20: 2.3}
 
-    out = runner.step(loads_kw, pv_kw, batt_home0_kw=+1.0, batt_home2_kw=-0.5, bess_kw=+3.0)
+    out = runner.step(loads_kw, pv_kw, batt_home3_kw=+1.0, batt_home5_kw=-0.5, bess_kw=+3.0)
 
     print("\n" + "="*50)
     print("SIMULATION RESULTS")

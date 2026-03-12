@@ -21,13 +21,13 @@ STATS_PATH = os.path.join(script_dir, "checkpoints", "best_model", "vecnormalize
 OUTPUT_DIR = os.path.join(os.path.dirname(script_dir), "results_plots")  # Where to save plots
 
 steps_to_plot = 96  # One day (15 min intervals)
-SCENARIO_NAME = "weekend_low_load" # Set to same as train.py (e.g. "heatwave_day") or None for default
+SCENARIO_NAME = "weekend_low_load_21_nodes" # Set to same as train.py (e.g. "heatwave_day") or None for default
  
 # Node configuration
-SOLAR_NODE_INDICES = [0, 1, 2, 4, 6, 8]
-LOAD_ONLY_NODE_INDICES = [3, 5, 7, 9]  
-HOME_BATTERY_INDICES = [0, 2]  # Which nodes have home batteries
-BESS_NODE_INDEX = 10
+SOLAR_NODE_INDICES = [3, 5, 7, 10, 11, 13, 15, 17, 18, 19, 20]
+LOAD_ONLY_NODE_INDICES = [0, 1, 2, 4, 6, 8, 9, 12, 14, 16]  
+HOME_BATTERY_INDICES = [3, 5]  # Which nodes have home batteries
+BESS_NODE_INDEX = 21
 
 # Create output directory
 os.makedirs(OUTPUT_DIR, exist_ok=True)

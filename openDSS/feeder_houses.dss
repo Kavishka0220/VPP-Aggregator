@@ -2,7 +2,7 @@ clear
 set defaultbasefrequency=50
 
 ! ========= CIRCUIT =========
-new circuit.VPP11 basekv=0.4 pu=1.0 phases=3 bus1=SourceBus
+new circuit.VPP_FEEDER basekv=0.4 pu=1.0 phases=3 bus1=SourceBus
 edit vsource.Source bus1=SourceBus basekv=0.4 pu=1.0 phases=3
 
 ! ========= LINE MODEL (simple LV) =========

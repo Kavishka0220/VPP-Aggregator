@@ -1,0 +1,63 @@
+================================================================================
+   VPP AGGREGATOR - ECONOMIC BENEFITS ANALYSIS
+================================================================================
+Generated at: 2026-03-13 08:22:35
+Model path: checkpoints/best_model/best_model
+Episodes: 1
+
+────────────────────────────────────────────────────────────────────────────────
+EPISODE 1/1
+────────────────────────────────────────────────────────────────────────────────
+
+Completed 96 steps
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                            POWER & ENERGY SUMMARY                           │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ ENERGY FLOWS (kWh):                                                         │
+│   Solar Generation:          333.87 kWh                                     │
+│   Load Consumption:          476.89 kWh                                     │
+│   Grid Import:               133.69 kWh                                     │
+│   Grid Export:                 0.00 kWh                                     │
+│                                                                             │
+│ BATTERY OPERATIONS (kWh):                                                   │
+│   BESS Charged:              161.80 kWh                                     │
+│   BESS Discharged:           157.56 kWh                                     │
+│   Net BESS Energy:            -4.24 kWh                                     │
+│   Solar Surplus:             153.22 kWh                                     │
+│                                                                             │
+│ SYSTEM EFFICIENCY:                                                          │
+│   Self-Consumption:            72.0 %                                       │
+│   Solar Utilization:          100.0 %                                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    ECONOMIC BREAKDOWN (Sri Lankan Rupees)                   │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ GRID OPERATIONS:                                                            │
+│   Export Revenue:          40475.23 LKR                                     │
+│   Import Cost:          -  88733.40 LKR                                     │
+│   Net Grid Profit:        -48258.17 LKR                                     │
+│                                                                             │
+│ BESS OPERATIONS:                                                            │
+│   Discharge Revenue:       23656.91 LKR                                     │
+│   Charge Cost:          -   2365.67 LKR                                     │
+│   Net BESS Profit:         21291.24 LKR                                     │
+│                                                                             │
+│ TOTAL SYSTEM:                                                               │
+│   Total Revenue:           64132.15 LKR                                     │
+│   Total Cost:           -  91099.08 LKR                                     │
+│   Net Profit:             -26966.93 LKR                                     │
+│                                                                             │
+│   Daily Profit:           -26966.93 LKR                                     │
+│   Annual Projection:     -9842929.43 LKR                                    │
+│                                                                             │
+│ PERFORMANCE METRICS:                                                        │
+│   Total Reward:            -6820.13                                         │
+│   Voltage Violations:             0 steps                                   │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+   ANALYSIS COMPLETE
+================================================================================

@@ -51,7 +51,7 @@ class UrbanVPPEnv(gym.Env):
         
         # Specs
         self.home_batt_cap = 13.5 # kWh
-        self.bess_cap = 120.0 # kWh
+        self.bess_cap = 200.0 # kWh
         self.home_batt_power = 5.0 # kW
         self.bess_power = 40.0 # kW
 

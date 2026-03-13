@@ -6,6 +6,7 @@ Tests the trained VPP agent and displays detailed economic breakdown
 import numpy as np
 import sys
 import os
+from datetime import datetime
 from stable_baselines3 import PPO
 
 # Add parent directory to path
@@ -13,6 +14,99 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
 from vpp_env import UrbanVPPEnv
+
+
+def _box_line(text=""):
+    text = str(text)
+    if len(text) > 76:
+        text = text[:76]
+    return f"│ {text:<76}│"
+
+
+def _episode_summary_lines(episode_metrics, episode_num, total_episodes, step_count):
+    """Build pretty text summary lines for one episode."""
+    self_consumption = episode_metrics["total_load_kwh"] - episode_metrics["grid_import_kwh"]
+    self_consumption_rate = (
+        (self_consumption / episode_metrics["total_load_kwh"] * 100)
+        if episode_metrics["total_load_kwh"] > 0
+        else 0
+    )
+    solar_utilization_rate = (
+        ((episode_metrics["total_solar_kwh"] - episode_metrics["grid_export_kwh"]) / episode_metrics["total_solar_kwh"] * 100)
+        if episode_metrics["total_solar_kwh"] > 0
+        else 0
+    )
+
+    total_revenue = episode_metrics["grid_export_revenue"] + episode_metrics["bess_discharge_revenue"]
+    total_cost = episode_metrics["grid_import_cost"] + episode_metrics["bess_charge_cost"]
+    net_profit = total_revenue - total_cost
+    annual_projection = net_profit * 365
+
+    grid_net = episode_metrics["grid_export_revenue"] - episode_metrics["grid_import_cost"]
+    bess_net = episode_metrics["bess_discharge_revenue"] - episode_metrics["bess_charge_cost"]
+    net_bess_energy = episode_metrics["bess_discharge_kwh"] - episode_metrics["bess_charge_kwh"]
+
+    lines = [
+        "",
+        "─" * 80,
+        f"EPISODE {episode_num}/{total_episodes}",
+        "─" * 80,
+        "",
+        f"Completed {step_count} steps",
+        "",
+        "┌" + "─" * 78 + "┐",
+        _box_line("POWER & ENERGY SUMMARY".center(76)),
+        "├" + "─" * 78 + "┤",
+        _box_line("ENERGY FLOWS (kWh):"),
+        _box_line(f"  Solar Generation:      {episode_metrics['total_solar_kwh']:>10.2f} kWh"),
+        _box_line(f"  Load Consumption:      {episode_metrics['total_load_kwh']:>10.2f} kWh"),
+        _box_line(f"  Grid Import:           {episode_metrics['grid_import_kwh']:>10.2f} kWh"),
+        _box_line(f"  Grid Export:           {episode_metrics['grid_export_kwh']:>10.2f} kWh"),
+        _box_line(),
+        _box_line("BATTERY OPERATIONS (kWh):"),
+        _box_line(f"  BESS Charged:          {episode_metrics['bess_charge_kwh']:>10.2f} kWh"),
+        _box_line(f"  BESS Discharged:       {episode_metrics['bess_discharge_kwh']:>10.2f} kWh"),
+        _box_line(f"  Net BESS Energy:       {net_bess_energy:>10.2f} kWh"),
+        _box_line(f"  Solar Surplus:         {episode_metrics['solar_surplus_kwh']:>10.2f} kWh"),
+        _box_line(),
+        _box_line("SYSTEM EFFICIENCY:"),
+        _box_line(f"  Self-Consumption:      {self_consumption_rate:>10.1f} %"),
+        _box_line(f"  Solar Utilization:     {solar_utilization_rate:>10.1f} %"),
+        "└" + "─" * 78 + "┘",
+        "",
+        "┌" + "─" * 78 + "┐",
+        _box_line("ECONOMIC BREAKDOWN (Sri Lankan Rupees)".center(76)),
+        "├" + "─" * 78 + "┤",
+        _box_line("GRID OPERATIONS:"),
+        _box_line(f"  Export Revenue:        {episode_metrics['grid_export_revenue']:>10.2f} LKR"),
+        _box_line(f"  Import Cost:          -{episode_metrics['grid_import_cost']:>10.2f} LKR"),
+        _box_line(f"  Net Grid Profit:       {grid_net:>10.2f} LKR"),
+        _box_line(),
+        _box_line("BESS OPERATIONS:"),
+        _box_line(f"  Discharge Revenue:     {episode_metrics['bess_discharge_revenue']:>10.2f} LKR"),
+        _box_line(f"  Charge Cost:          -{episode_metrics['bess_charge_cost']:>10.2f} LKR"),
+        _box_line(f"  Net BESS Profit:       {bess_net:>10.2f} LKR"),
+        _box_line(),
+        _box_line("TOTAL SYSTEM:"),
+        _box_line(f"  Total Revenue:         {total_revenue:>10.2f} LKR"),
+        _box_line(f"  Total Cost:           -{total_cost:>10.2f} LKR"),
+        _box_line(f"  Net Profit:            {net_profit:>10.2f} LKR"),
+        _box_line(),
+        _box_line(f"  Daily Profit:          {net_profit:>10.2f} LKR"),
+        _box_line(f"  Annual Projection:     {annual_projection:>10.2f} LKR"),
+        _box_line(),
+        _box_line("PERFORMANCE METRICS:"),
+        _box_line(f"  Total Reward:          {episode_metrics['total_reward']:>10.2f}"),
+        _box_line(f"  Voltage Violations:    {int(episode_metrics['voltage_violations']):>10d} steps"),
+        "└" + "─" * 78 + "┘",
+        "",
+    ]
+    return lines
+
+
+def _write_summary_report(report_lines, output_path):
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(report_lines))
 
 def print_economics(model_path="checkpoints/best_model/best_model", num_episodes=1):
     """
@@ -26,11 +120,23 @@ def print_economics(model_path="checkpoints/best_model/best_model", num_episodes
     print("="*80)
     print("   VPP AGGREGATOR - ECONOMIC BENEFITS ANALYSIS")
     print("="*80)
+
+    output_dir = os.path.join(os.path.dirname(current_dir), "results_plots")
+    os.makedirs(output_dir, exist_ok=True)
+    summary_file = os.path.join(output_dir, "economics_summary.txt")
+    report_lines = [
+        "=" * 80,
+        "   VPP AGGREGATOR - ECONOMIC BENEFITS ANALYSIS",
+        "=" * 80,
+        f"Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Model path: {model_path}",
+        f"Episodes: {num_episodes}",
+    ]
     
     # Load environment and model
     try:
         data_path = os.path.join(os.path.dirname(current_dir), "data")
-        env = UrbanVPPEnv(data_path=data_path)
+        env = UrbanVPPEnv(data_path=data_path, scenario_name="weekend_low_load_21_nodes")
         
         # Resolve model path to absolute
         if not os.path.isabs(model_path):
@@ -40,6 +146,8 @@ def print_economics(model_path="checkpoints/best_model/best_model", num_episodes
         print(f"[OK] Loaded model from: {model_path}\n")
     except Exception as e:
         print(f"[ERROR] Failed to load model: {e}")
+        report_lines.append(f"[ERROR] Failed to load model: {e}")
+        _write_summary_report(report_lines, summary_file)
         return
     
     # Run episodes and collect economics
@@ -158,6 +266,8 @@ def print_economics(model_path="checkpoints/best_model/best_model", num_episodes
         print(f"│   Solar Utilization:     {solar_utilization_rate:>10.1f} %" + " "*40 + "│")
         
         print("└" + "─"*78 + "┘")
+
+        report_lines.extend(_episode_summary_lines(episode_metrics, episode + 1, num_episodes, step_count))
         print()
         print("┌" + "─"*78 + "┐")
         print("│" + " "*23 + "ECONOMIC BREAKDOWN (Sri Lankan Rupees)" + " "*17 + "│")
@@ -245,6 +355,26 @@ def print_economics(model_path="checkpoints/best_model/best_model", num_episodes
         print(f"  Average Annual Profit:  {avg_net_profit*365:>10.2f} LKR")
         print(f"  Average Total Reward:   {avg_metrics['total_reward']:>10.2f}")
         print(f"  Average Violations:     {avg_metrics['voltage_violations']:>10.1f} steps")
+
+        report_lines.extend([
+            "",
+            "=" * 80,
+            f"AVERAGE OVER {num_episodes} EPISODES",
+            "=" * 80,
+            f"Average net profit: {avg_net_profit:.2f} LKR",
+            f"Average annual profit: {avg_net_profit * 365:.2f} LKR",
+            f"Average self-consumption: {avg_self_consumption_rate:.1f} %",
+            f"Average solar utilization: {avg_solar_utilization_rate:.1f} %",
+            f"Average total reward: {avg_metrics['total_reward']:.2f}",
+            f"Average voltage violations: {avg_metrics['voltage_violations']:.1f} steps",
+        ])
+
+    report_lines.append("")
+    report_lines.append("=" * 80)
+    report_lines.append("   ANALYSIS COMPLETE")
+    report_lines.append("=" * 80)
+    _write_summary_report(report_lines, summary_file)
+    print(f"[OK] Saved summary to: {summary_file}")
     
     print("\n" + "="*80)
     print("   ANALYSIS COMPLETE")

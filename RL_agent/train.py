@@ -39,7 +39,7 @@ def main():
 
     # Set to a scenario name (e.g., "heatwave_day") to train on that specific scenario.
     # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
-    scenario_name = "weekend_low_load_21_nodes"  # Use 21-node version for 21-load system
+    scenario_name = "heatwave_day_21_nodes"  # Use 21-node version for 21-load system
 
 
     
@@ -121,7 +121,7 @@ def main():
         "MlpPolicy", 
         env, 
         verbose=1,
-        learning_rate=linear_schedule(12e-4),  # Decaying LR for better convergence
+        learning_rate=linear_schedule(3e-4),  # Decaying LR for better convergence
         gamma=0.995,                # Discount factor
         gae_lambda=0.95,           # GAE smoothing
         clip_range=0.2,            # PPO clipping parameter

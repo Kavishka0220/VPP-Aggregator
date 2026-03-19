@@ -16,7 +16,7 @@ from openDSS.run_opendss import VPPDSSRunner
 class UrbanVPPEnv(gym.Env):
     """
     Final Thesis VPP Environment
-    - Constraints: Voltage must be between 0.9 and 1.1 p.u.
+    - Constraints: Voltage must be between 0.94 and 1.06 p.u.
     - Inputs: Common Solar, 21 Loads, 22 Node Voltages, 3 SoCs, Time.
     """
     
@@ -593,17 +593,17 @@ class UrbanVPPEnv(gym.Env):
                     else:
                         night_charge_bonus += -10.0 * bess_charge_power
 
-        # B. Voltage Violation Penalty (0.9 to 1.1 p.u. limits)
+        # B. Voltage Violation Penalty (0.94 to 1.06 p.u. limits)
         # Monitor all nodes for grid safety compliance (3-phase aware)
         critical_nodes = list(range(21)) + [self.bess_index]
 
-        # Check undervoltage: min voltage per bus should be >= 0.9
+        # Check undervoltage: min voltage per bus should be >= 0.94
         min_voltages = self.voltages_min[critical_nodes]
-        under_voltage = np.maximum(0, 0.9 - min_voltages)
+        under_voltage = np.maximum(0, 0.94 - min_voltages)
         
-        # Check overvoltage: max voltage per bus should be <= 1.1
+        # Check overvoltage: max voltage per bus should be <= 1.06
         max_voltages = self.voltages_max[critical_nodes]
-        over_voltage = np.maximum(0, max_voltages - 1.1)
+        over_voltage = np.maximum(0, max_voltages - 1.06)
         
         total_violation = np.sum(over_voltage + under_voltage)
         
@@ -611,7 +611,7 @@ class UrbanVPPEnv(gym.Env):
         # Example: 0.01 p.u. deviation → -1 penalty
         # Example: 0.01 p.u. deviation → -1 penalty
         # voltage_penalty = -100.0 * total_violation
-        voltage_penalty = -50.0 * (total_violation ** 2)
+        voltage_penalty = -100.0 * (total_violation ** 2)
 
         # C. Battery Health & Smoothness
         # Penalize rapid power changes to reduce battery stress

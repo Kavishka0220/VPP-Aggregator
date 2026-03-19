@@ -21,7 +21,7 @@ STATS_PATH = os.path.join(script_dir, "checkpoints", "best_model", "vecnormalize
 OUTPUT_DIR = os.path.join(os.path.dirname(script_dir), "results_plots")  # Where to save plots
 
 steps_to_plot = 96  # One day (15 min intervals)
-SCENARIO_NAME = "weekend_low_load_21_nodes" # Set to same as train.py (e.g. "heatwave_day") or None for default
+SCENARIO_NAME = "heatwave_day_21_nodes" # Set to same as train.py (e.g. "heatwave_day") or None for default
  
 # Node configuration
 SOLAR_NODE_INDICES = [3, 5, 7, 10, 11, 13, 15, 17, 18, 19, 20]
@@ -128,7 +128,7 @@ print(f"[OK] Simulation complete ({len(history['rewards'])} steps)")
 total_reward = sum(history["rewards"])
 total_export = sum(history["grid_export"]) * 0.25  # kWh
 total_import = sum(history["grid_import"]) * 0.25  # kWh
-voltage_violations = sum(1 for v in history["all_voltages"] if np.any((np.array(v) > 1.1) | (np.array(v) < 0.9)))
+voltage_violations = sum(1 for v in history["all_voltages"] if np.any((np.array(v) > 1.06) | (np.array(v) < 0.94)))
 
 print("\n=== Performance Summary ===")
 print(f"Total Reward: {total_reward:.2f}")
@@ -247,10 +247,10 @@ fig3, axes = plt.subplots(3, 1, figsize=(16, 10), sharex=True)
 # Plot 1: BESS Node Voltage
 axes[0].set_title("Voltage at BESS Connection Point", fontsize=10, fontweight='bold')
 axes[0].plot(time_axis, voltage_matrix[:, BESS_NODE_INDEX], color='#FF4500', linewidth=1.5, label=f'Node {BESS_NODE_INDEX} (BESS)')
-axes[0].axhline(y=1.10, color='black', linestyle='--', linewidth=1.5, label='Upper Limit (1.10 p.u.)')
+axes[0].axhline(y=1.06, color='black', linestyle='--', linewidth=1.5, label='Upper Limit (1.06 p.u.)')
 axes[0].axhline(y=1.00, color='gray', linestyle=':', linewidth=1, alpha=0.7, label='Nominal (1.00 p.u.)')
-axes[0].axhline(y=0.90, color='black', linestyle='--', linewidth=1.5, label='Lower Limit (0.90 p.u.)')
-axes[0].fill_between(time_axis, 0.90, 1.10, color='green', alpha=0.1, label='Safe Zone')
+axes[0].axhline(y=0.94, color='black', linestyle='--', linewidth=1.5, label='Lower Limit (0.94 p.u.)')
+axes[0].fill_between(time_axis, 0.94, 1.06, color='green', alpha=0.1, label='Safe Zone')
 axes[0].set_ylabel("Voltage (p.u.)", fontweight='bold')
 axes[0].set_ylim(0.85, 1.15)
 axes[0].legend(loc="upper left", bbox_to_anchor=(1.01, 1), framealpha=0.9, fontsize=6)
@@ -262,10 +262,10 @@ colors_solar = plt.cm.tab10(np.linspace(0, 1, len(SOLAR_NODE_INDICES)))
 for i, node_idx in enumerate(SOLAR_NODE_INDICES):
     axes[1].plot(time_axis, voltage_matrix[:, node_idx], label=f'Node {node_idx}', 
                 color=colors_solar[i], linewidth=1.2, alpha=0.8)
-axes[1].axhline(y=1.10, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
-axes[1].axhline(y=0.90, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
+axes[1].axhline(y=1.06, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
+axes[1].axhline(y=0.94, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
 axes[1].axhline(y=1.00, color='gray', linestyle=':', linewidth=1, alpha=0.5)
-axes[1].fill_between(time_axis, 0.90, 1.10, color='green', alpha=0.1)
+axes[1].fill_between(time_axis, 0.94, 1.06, color='green', alpha=0.1)
 axes[1].set_ylabel("Voltage (p.u.)", fontweight='bold')
 axes[1].set_ylim(0.85, 1.15)
 axes[1].legend(loc="upper left", bbox_to_anchor=(1.01, 1), ncol=2, framealpha=0.9, fontsize=6)

@@ -34,7 +34,7 @@ class VPPDSSRunner:
       -kw => charge    (consume from grid)
     """
 
-    def __init__(self, dss_file: Path, vmin_pu: float = 0.9, vmax_pu: float = 1.1):
+    def __init__(self, dss_file: Path, vmin_pu: float = 0.94, vmax_pu: float = 1.06):
         self.dss_file = Path(dss_file)
         self.vmin_pu = float(vmin_pu)
         self.vmax_pu = float(vmax_pu)

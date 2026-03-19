@@ -22,10 +22,11 @@ class UrbanVPPEnv(gym.Env):
     
     metadata = {'render_modes': []}
     
-    def __init__(self, data_path="./data", scenario_name=None, start_index=None):
+    def __init__(self, data_path="./data", scenario_name=None, start_index=None, verbose=False):
         super(UrbanVPPEnv, self).__init__()
         
         # Testing configuration
+        self.verbose = verbose
         self.default_start_index = start_index
 
         # Initialize OpenDSS Runner
@@ -88,13 +89,31 @@ class UrbanVPPEnv(gym.Env):
         try:
             if scenario_name:
                 scenario_folder = os.path.join(data_path, "forecast_scenarios")
+                solar_file = os.path.join(scenario_folder, f"solar_{scenario_name}.csv")
+                load_file = os.path.join(scenario_folder, f"load_{scenario_name}.csv")
+                
+                # Verify files exist
+                if not os.path.exists(solar_file):
+                    raise FileNotFoundError(f"Scenario file not found: {solar_file}")
+                if not os.path.exists(load_file):
+                    raise FileNotFoundError(f"Scenario file not found: {load_file}")
+                
                 print(f"[INFO] Loading Scenario: {scenario_name}")
-                self.solar_df = pd.read_csv(f"{scenario_folder}/solar_{scenario_name}.csv")
-                self.load_df = pd.read_csv(f"{scenario_folder}/load_{scenario_name}.csv")
+                if self.verbose:
+                    print(f"[DEBUG] Solar file: {solar_file}")
+                    print(f"[DEBUG] Load file: {load_file}")
+                self.solar_df = pd.read_csv(solar_file)
+                self.load_df = pd.read_csv(load_file)
             else:
                 # These files contain 21 columns (House 0 to House 20)
-                self.solar_df = pd.read_csv(f"{data_path}/solar_forecast_formatted.csv")
-                self.load_df = pd.read_csv(f"{data_path}/load_forecast.csv")
+                solar_file = os.path.join(data_path, "solar_forecast_formatted.csv")
+                load_file = os.path.join(data_path, "load_forecast.csv")
+                print(f"[INFO] Loading default data files")
+                if self.verbose:
+                    print(f"[DEBUG] Solar file: {solar_file}")
+                    print(f"[DEBUG] Load file: {load_file}")
+                self.solar_df = pd.read_csv(solar_file)
+                self.load_df = pd.read_csv(load_file)
             
             # Clean and validate data - handle various CSV formats
             # Process solar dataframe
@@ -176,10 +195,19 @@ class UrbanVPPEnv(gym.Env):
             if len(self.solar_df) < self.max_steps:
                 raise ValueError(f"Data must have at least {self.max_steps} rows. Got: {len(self.solar_df)}")
             
-            print(f"[OK] Data Loaded Successfully! Final Length: {len(self.solar_df)}")
-        except FileNotFoundError:
+            # Log final verification
+            scenario_info = f"Scenario: {scenario_name}" if scenario_name else "Default data"
+            print(f"[OK] Data Loaded Successfully! {scenario_info}")
+            if self.verbose:
+                print(f"[OK] Solar shape: {self.solar_df.shape}, Load shape: {self.load_df.shape}")
+                print(f"[OK] Final Length: {len(self.solar_df)}")
+                print(f"[DEBUG] Solar sample (first row): {self.solar_df.iloc[0].values[:5]}...")
+                print(f"[DEBUG] Load sample (first row): {self.load_df.iloc[0].values[:5]}...")
+        except FileNotFoundError as e:
             # Fallback dummy data
-            print("[WARNING] Using dummy random data")
+            print(f"[WARNING] File loading error: {e}")
+            print("[WARNING] Using dummy random data due to file loading error.")
+            print("[WARNING] This is a fallback - verify your data_path and scenario_name!")
             self.solar_df = pd.DataFrame(np.random.rand(1000, 21) * 5.0)
             self.load_df = pd.DataFrame(np.random.rand(1000, 21) * 3.0)    
 

@@ -33,13 +33,12 @@ def main():
     #   "intermittent_solar_dropouts"   : Random solar dropouts
     #   "load_higher_day"               : All loads scaled up
     #   "Next_Day_Forecast_21"         : Load dip 00:00-02:00
-    #   "solar_shifted_late"            : Solar delayed (morning clouds)
     #   "solar_unavailable_day"         : Solar set to 0 all day
     #   "weekend_low_load"              : All loads scaled down
 
     # Set to a scenario name (e.g., "heatwave_day") to train on that specific scenario.
     # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
-    scenario_name = "load_higher_day_21_nodes"  # Use 21-node version for 21-load system
+    scenario_name = "cloudy_reduced_solar_21_nodes"  # Use 21-node version for 21-load system
 
 
     

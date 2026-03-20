@@ -26,19 +26,17 @@ def main():
 
     # === SCENARIO SELECTION ===
     # Available Scenarios:
-    #   "cloudy_reduced_solar"          : Solar reduced with variability
-    #   "daytime_peak_load_day"         : Extra midday load bump
-    #   "evening_peak_load_day"         : Extra evening load bump
-    #   "heatwave_day"                  : Higher daytime load + reduced solar
-    #   "intermittent_solar_dropouts"   : Random solar dropouts
-    #   "load_higher_day"               : All loads scaled up
-    #   "Next_Day_Forecast_21"         : Load dip 00:00-02:00
-    #   "solar_unavailable_day"         : Solar set to 0 all day
-    #   "weekend_low_load"              : All loads scaled down
+    #   "cloudy_day"               : Cloudy day with reduced solar
+    #   "daytime_peak"             : Extra midday load bump
+    #   "intermittent_solar"       : Random solar dropouts
+    #   "low_load_weekend"         : Lower loads (weekend scenario)
+    #   "Next_Day_Forecast_21_nodes" : Load dip 00:00-02:00 (21-node version)
+    #   "night_peak"               : Extra evening/night load bump
+    #   "solar_unavailable_day"    : Solar set to 0 all day
 
-    # Set to a scenario name (e.g., "heatwave_day") to train on that specific scenario.
+    # Set to a scenario name (e.g., "cloudy_day") to train on that specific scenario.
     # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
-    scenario_name = "daytime_peak_load_day_21_nodes"  # Use 21-node version for 21-load system
+    scenario_name = "daytime_peak"  # Change to any scenario above
 
 
     

@@ -1,7 +1,7 @@
 ================================================================================
    VPP AGGREGATOR - ECONOMIC BENEFITS ANALYSIS
 ================================================================================
-Generated at: 2026-03-19 18:54:12
+Generated at: 2026-03-20 18:47:04
 Model path: checkpoints/best_model/best_model
 Episodes: 1
 
@@ -17,17 +17,17 @@ Completed 96 steps
 │ ENERGY FLOWS (kWh):                                                         │
 │   Solar Generation:          333.87 kWh                                     │
 │   Load Consumption:          476.89 kWh                                     │
-│   Grid Import:               141.15 kWh                                     │
+│   Grid Import:               137.48 kWh                                     │
 │   Grid Export:                 0.00 kWh                                     │
 │                                                                             │
 │ BATTERY OPERATIONS (kWh):                                                   │
 │   BESS Charged:              161.80 kWh                                     │
-│   BESS Discharged:           161.74 kWh                                     │
-│   Net BESS Energy:            -0.06 kWh                                     │
+│   BESS Discharged:           162.99 kWh                                     │
+│   Net BESS Energy:             1.20 kWh                                     │
 │   Solar Surplus:             153.22 kWh                                     │
 │                                                                             │
 │ SYSTEM EFFICIENCY:                                                          │
-│   Self-Consumption:            70.4 %                                       │
+│   Self-Consumption:            71.2 %                                       │
 │   Solar Utilization:          100.0 %                                       │
 └──────────────────────────────────────────────────────────────────────────────┘
 
@@ -35,25 +35,25 @@ Completed 96 steps
 │                    ECONOMIC BREAKDOWN (Sri Lankan Rupees)                   │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ GRID OPERATIONS:                                                            │
-│   Export Revenue:          41161.89 LKR                                     │
-│   Import Cost:          -  90215.96 LKR                                     │
-│   Net Grid Profit:        -49054.06 LKR                                     │
+│   Export Revenue:          41792.60 LKR                                     │
+│   Import Cost:          -  90217.96 LKR                                     │
+│   Net Grid Profit:        -48425.36 LKR                                     │
 │                                                                             │
 │ BESS OPERATIONS:                                                            │
-│   Discharge Revenue:       24399.83 LKR                                     │
+│   Discharge Revenue:       24573.51 LKR                                     │
 │   Charge Cost:          -   2365.67 LKR                                     │
-│   Net BESS Profit:         22034.16 LKR                                     │
+│   Net BESS Profit:         22207.84 LKR                                     │
 │                                                                             │
 │ TOTAL SYSTEM:                                                               │
-│   Total Revenue:           65561.72 LKR                                     │
-│   Total Cost:           -  92581.63 LKR                                     │
-│   Net Profit:             -27019.91 LKR                                     │
+│   Total Revenue:           66366.11 LKR                                     │
+│   Total Cost:           -  92583.63 LKR                                     │
+│   Net Profit:             -26217.52 LKR                                     │
 │                                                                             │
-│   Daily Profit:           -27019.91 LKR                                     │
-│   Annual Projection:     -9862266.29 LKR                                    │
+│   Daily Profit:           -26217.52 LKR                                     │
+│   Annual Projection:     -9569396.09 LKR                                    │
 │                                                                             │
 │ PERFORMANCE METRICS:                                                        │
-│   Total Reward:            -7039.54                                         │
+│   Total Reward:            -6892.42                                         │
 │   Voltage Violations:            17 steps                                   │
 └──────────────────────────────────────────────────────────────────────────────┘
 

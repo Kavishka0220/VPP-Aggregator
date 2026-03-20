@@ -118,7 +118,7 @@ def main():
             
             plt.title(f'Scenario Analysis: {name}')
             plt.ylabel('Power (kW)')
-            plt.xlabel('Time')
+            plt.xlabel('Time', fontweight='bold')
             plt.legend()
             plt.tight_layout()
             
@@ -150,7 +150,7 @@ def main():
 
     ax2.set_title('Aggregate Solar Profiles (All Scenarios)')
     ax2.set_ylabel('Power (kW)')
-    ax2.set_xlabel('Time')
+    ax2.set_xlabel('Time', fontweight='bold')
     ax2.legend(bbox_to_anchor=(1.02, 1), loc='upper left', fontsize='small', borderaxespad=0.)
     plt.subplots_adjust(top=0.95, bottom=0.07, left=0.07, right=0.83, hspace=0.25)
 

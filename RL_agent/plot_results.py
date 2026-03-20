@@ -21,7 +21,7 @@ STATS_PATH = os.path.join(script_dir, "checkpoints", "best_model", "vecnormalize
 OUTPUT_DIR = os.path.join(os.path.dirname(script_dir), "results_plots")  # Where to save plots
 
 steps_to_plot = 96  # One day (15 min intervals)
-SCENARIO_NAME = "cloudy_reduced_solar_21_nodes" # Set to same as train.py (e.g. "heatwave_day") or None for default
+SCENARIO_NAME = "daytime_peak_load_day_21_nodes" # Set to same as train.py (e.g. "heatwave_day") or None for default
  
 # Node configuration
 SOLAR_NODE_INDICES = [3, 5, 7, 10, 11, 13, 15, 17, 18, 19, 20]
@@ -31,6 +31,11 @@ BESS_NODE_INDEX = 21
 
 # Create output directory
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# Create scenario-specific subdirectory
+SCENARIO_FOLDER = os.path.join(OUTPUT_DIR, SCENARIO_NAME) if SCENARIO_NAME else os.path.join(OUTPUT_DIR, "default")
+os.makedirs(SCENARIO_FOLDER, exist_ok=True)
+print(f"[INFO] Saving outputs to scenario folder: {SCENARIO_FOLDER}")
 
 # 1. Load the Environment and Model
 print("[INFO] Loading environment and model...")
@@ -173,7 +178,7 @@ ax2.grid(True, alpha=0.3)
 ax2.set_xticks(np.arange(0, 25, 4))
 
 plt.subplots_adjust(left=0.05, bottom=0.08, right=0.89, top=0.94, hspace=0.22)
-output_file_1a = f"{OUTPUT_DIR}/thesis_result_plot.png"
+output_file_1a = f"{SCENARIO_FOLDER}/thesis_result_plot.png"
 plt.savefig(output_file_1a, dpi=300, bbox_inches='tight')
 print(f"[OK] Saved '{output_file_1a}'")
 
@@ -234,7 +239,7 @@ for ax in axes:
     ax.set_xlim(0, 24)
 
 plt.subplots_adjust(left=0.06, bottom=0.08, right=0.85, top=0.95, hspace=0.3)
-output_file_2 = f"{OUTPUT_DIR}/1_power_economics_detailed.png"
+output_file_2 = f"{SCENARIO_FOLDER}/1_power_economics_detailed.png"
 plt.savefig(output_file_2, dpi=300, bbox_inches='tight')
 print(f"[OK] Saved '{output_file_2}'")
 
@@ -293,7 +298,7 @@ for ax in axes:
     ax.set_xlim(0, 24)
 
 plt.subplots_adjust(left=0.05, bottom=0.08, right=0.85, top=0.94, hspace=0.22)
-output_file_3 = f"{OUTPUT_DIR}/2_voltage_profiles.png"
+output_file_3 = f"{SCENARIO_FOLDER}/2_voltage_profiles.png"
 plt.savefig(output_file_3, dpi=300, bbox_inches='tight')
 print(f"[OK] Saved '{output_file_3}'")
 
@@ -331,7 +336,7 @@ for ax in axes:
     ax.set_xlim(0, 24)
 
 plt.subplots_adjust(left=0.06, bottom=0.08, right=0.97, top=0.95, hspace=0.2)
-output_file_4 = f"{OUTPUT_DIR}/3_rewards.png"
+output_file_4 = f"{SCENARIO_FOLDER}/3_rewards.png"
 plt.savefig(output_file_4, dpi=300, bbox_inches='tight')
 print(f"[OK] Saved '{output_file_4}'")
 
@@ -355,13 +360,13 @@ results_df = pd.DataFrame({
     "Instant_Reward": history["rewards"]
 })
 
-csv_file_path = f"{OUTPUT_DIR}/detailed_simulation_results.csv"
+csv_file_path = f"{SCENARIO_FOLDER}/detailed_simulation_results.csv"
 results_df.to_csv(csv_file_path, index=False)
 print(f"[OK] Saved detailed results to '{csv_file_path}'")
 
 print("\n" + "="*50)
 print("All plots saved successfully!")
-print(f"Output directory: {OUTPUT_DIR}/")
+print(f"Output directory: {SCENARIO_FOLDER}/")
 print("="*50)
 
 plt.show()

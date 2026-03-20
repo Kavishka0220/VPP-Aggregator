@@ -38,7 +38,7 @@ def main():
 
     # Set to a scenario name (e.g., "heatwave_day") to train on that specific scenario.
     # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
-    scenario_name = "cloudy_reduced_solar_21_nodes"  # Use 21-node version for 21-load system
+    scenario_name = "daytime_peak_load_day_21_nodes"  # Use 21-node version for 21-load system
 
 
     

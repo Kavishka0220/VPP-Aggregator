@@ -91,7 +91,10 @@ history = {
     "rewards": [],  # Track rewards
     "grid_import": [],  # Track grid interactions
     "grid_export": [],
-    "net_power": []  # Net power flow
+    "net_power": [],  # Net power flow
+    # Per-node data for homes
+    "hb1_load": [], "hb1_solar": [],
+    "hb2_load": [], "hb2_solar": []
 }
 
 print("[INFO] Running simulation for 1 day (96 steps)...")
@@ -112,6 +115,12 @@ for step in range(steps_to_plot):
     load_total = np.sum(real_env.load_episode[t])
     history["solar"].append(solar_total)
     history["load"].append(load_total)
+    
+    # Per-node data for homes
+    history["hb1_load"].append(real_env.load_episode[t][HOME_BATTERY_INDICES[0]])
+    history["hb1_solar"].append(real_env.solar_episode[t][HOME_BATTERY_INDICES[0]])
+    history["hb2_load"].append(real_env.load_episode[t][HOME_BATTERY_INDICES[1]])
+    history["hb2_solar"].append(real_env.solar_episode[t][HOME_BATTERY_INDICES[1]])
     
     history["hb1_power"].append(real_env.node_battery_power_kw[HOME_BATTERY_INDICES[0]])
     history["hb2_power"].append(real_env.node_battery_power_kw[HOME_BATTERY_INDICES[1]])
@@ -186,7 +195,7 @@ print(f"[OK] Saved '{output_file_1a}'")
 # FIGURE 2: Comprehensive Power & Economics
 # ==========================================
 print("[INFO] Generating Figure 2 (Detailed Power & Economics)...")
-fig2, axes = plt.subplots(4, 1, figsize=(16, 12), sharex=True)
+fig2, axes = plt.subplots(3, 1, figsize=(16, 10), sharex=True)
 
 # Subplot 1: Power Balance
 axes[0].set_title("Power Generation and Consumption", fontsize=9, fontweight='bold')
@@ -198,56 +207,125 @@ axes[0].set_ylabel("Power (kW)", fontweight='bold')
 axes[0].legend(loc="upper left", bbox_to_anchor=(1.01, 1), framealpha=0.9, fontsize=6)
 axes[0].grid(True, alpha=0.3)
 
-# Subplot 2: Battery Operations
-axes[1].set_title("Battery Power (Negative = Charging, Positive = Discharging)", fontsize=9, fontweight='bold')
-axes[1].plot(time_axis, history["bess_power"], color='#32CD32', linewidth=1.5, label='BESS (40kW)', alpha=0.8)
-axes[1].plot(time_axis, history["hb1_power"], color='#A680F1', linestyle='--', linewidth=1.2, label='Home Battery 1 (5kW)')
-axes[1].plot(time_axis, history["hb2_power"], color='#BC14FF', linestyle=':', linewidth=1.2, label='Home Battery 2 (5kW)')
+# Subplot 2: BESS Charge/Discharge Curve + SOC (Dual Axis)
+axes[1].set_title("BESS Charge/Discharge Power & State of Charge(SoC)", fontsize=9, fontweight='bold')
+# Left y-axis: Power
+axes[1].plot(time_axis, history["bess_power"], color='#32CD32', linewidth=1.8, label='BESS Power', alpha=0.9)
+axes[1].fill_between(time_axis, 0, history["bess_power"], where=np.array(history["bess_power"])>0, color='#32CD32', alpha=0.25, label='Discharge')
+axes[1].fill_between(time_axis, 0, history["bess_power"], where=np.array(history["bess_power"])<0, color='#FF6347', alpha=0.25, label='Charge')
 axes[1].axhline(y=0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
-axes[1].fill_between(time_axis, 0, history["bess_power"], where=np.array(history["bess_power"])>0, color='#32CD32', alpha=0.2, label='Discharge')
-axes[1].fill_between(time_axis, 0, history["bess_power"], where=np.array(history["bess_power"])<0, color='#32CD32', alpha=0.4, label='Charge')
-axes[1].set_ylabel("Power (kW)", fontweight='bold')
-axes[1].legend(loc="upper left", bbox_to_anchor=(1.01, 1), framealpha=0.9, fontsize=6)
+axes[1].set_ylabel("BESS Power (kW)", fontweight='bold', color='#32CD32')
+axes[1].tick_params(axis='y', labelcolor='#32CD32')
+# Right y-axis: SOC
+ax1_right = axes[1].twinx()
+ax1_right.plot(time_axis, history["soc_bess"], color='#1E90FF', linewidth=1.5, linestyle='--', label='BESS SOC', alpha=0.9)
+ax1_right.axhline(y=0.8, color='black', linestyle=':', linewidth=1, alpha=0.5)
+ax1_right.axhline(y=0.2, color='black', linestyle=':', linewidth=1, alpha=0.5)
+ax1_right.fill_between(time_axis, 0.2, 0.8, color='green', alpha=0.05)
+ax1_right.set_ylabel("BESS SOC (0-1)", fontweight='bold', color='#1E90FF')
+ax1_right.tick_params(axis='y', labelcolor='#1E90FF')
+ax1_right.set_ylim(0, 1.05)
+# Combined legend
+lines1, labels1 = axes[1].get_legend_handles_labels()
+lines2, labels2 = ax1_right.get_legend_handles_labels()
+axes[1].legend(lines1 + lines2, labels1 + labels2, loc="upper left", bbox_to_anchor=(1.02, 1), framealpha=0.9, fontsize=6)
 axes[1].grid(True, alpha=0.3)
 
-# Subplot 3: Battery State of Charge
-axes[2].set_title("Battery State of Charge", fontsize=9, fontweight='bold')
-axes[2].plot(time_axis, history["soc_bess"], color='#32CD32', linewidth=1.8, label='BESS (120kWh)')
-axes[2].plot(time_axis, history["soc_hb1"], color="#A680F1", linestyle='--', linewidth=1.5, label='Home Battery 1 (13.5kWh)')
-axes[2].plot(time_axis, history["soc_hb2"], color="#BC14FF", linestyle=':', linewidth=1.5, label='Home Battery 2 (13.5kWh)')
-axes[2].axhline(y=0.8, color='red', linestyle='--', linewidth=1, alpha=0.5, label='Upper Limit')
-axes[2].axhline(y=0.2, color='red', linestyle='--', linewidth=1, alpha=0.5, label='Lower Limit')
-axes[2].fill_between(time_axis, 0.2, 0.8, color='green', alpha=0.1, label='Safe Zone')
-axes[2].set_ylabel("SoC (0-1)", fontweight='bold')
-axes[2].set_ylim(0, 1.05)
+# Subplot 3: Grid Interaction
+axes[2].set_title("Grid Power Exchange", fontsize=9, fontweight='bold')
+axes[2].fill_between(time_axis, 0, history["grid_export"], color='#32CD32', alpha=0.6, label='Export to Grid')
+axes[2].fill_between(time_axis, 0, [-x for x in history["grid_import"]], color='#FF6347', alpha=0.6, label='Import from Grid')
+axes[2].axhline(y=0, color='black', linestyle='-', linewidth=1)
+axes[2].set_ylabel("Power (kW)", fontweight='bold')
+axes[2].set_xlabel("Time (Hours)", fontweight='bold')
 axes[2].legend(loc="upper left", bbox_to_anchor=(1.01, 1), framealpha=0.9, fontsize=6)
 axes[2].grid(True, alpha=0.3)
-
-# Subplot 4: Grid Interaction
-axes[3].set_title("Grid Power Exchange", fontsize=9, fontweight='bold')
-axes[3].fill_between(time_axis, 0, history["grid_export"], color='#32CD32', alpha=0.6, label='Export to Grid')
-axes[3].fill_between(time_axis, 0, [-x for x in history["grid_import"]], color='#FF6347', alpha=0.6, label='Import from Grid')
-axes[3].axhline(y=0, color='black', linestyle='-', linewidth=1)
-axes[3].set_ylabel("Power (kW)", fontweight='bold')
-axes[3].set_xlabel("Time (Hours)", fontweight='bold')
-axes[3].legend(loc="upper left", bbox_to_anchor=(1.01, 1), framealpha=0.9, fontsize=6)
-axes[3].grid(True, alpha=0.3)
 
 # Format x-axis
 for ax in axes:
     ax.set_xticks(np.arange(0, 25, 2))
     ax.set_xlim(0, 24)
 
-plt.subplots_adjust(left=0.06, bottom=0.08, right=0.85, top=0.95, hspace=0.3)
+plt.subplots_adjust(left=0.06, bottom=0.08, right=0.87, top=0.95, hspace=0.25)
 output_file_2 = f"{SCENARIO_FOLDER}/1_power_economics_detailed.png"
 plt.savefig(output_file_2, dpi=300, bbox_inches='tight')
 print(f"[OK] Saved '{output_file_2}'")
 
 # ==========================================
-# FIGURE 3: Voltage Profiles (All Nodes)
 # ==========================================
-print("[INFO] Generating Figure 3 (Voltage Profiles)...")
-fig3, axes = plt.subplots(3, 1, figsize=(16, 10), sharex=True)
+# FIGURE 3: Home Batteries - Detailed Per-Home Analysis
+# ==========================================
+print("[INFO] Generating Figure 3 (Home Batteries Details)...")
+fig3, axes = plt.subplots(2, 1, figsize=(16, 10), sharex=True)
+
+# Subplot 1: Home 1 (Node 3) - Load, Solar, Battery Power (Left Axis), SOC (Right Axis)
+axes[0].set_title(f"Home at Node {HOME_BATTERY_INDICES[0]} - Load, Solar, Battery Operations & State of Charge", fontsize=10, fontweight='bold')
+# Left y-axis: Power flows
+axes[0].plot(time_axis, history["hb1_load"], color='#1E90FF', linewidth=1, label='Load Demand', alpha=0.8)
+axes[0].plot(time_axis, history["hb1_solar"], color='#FF8C00', linewidth=1, label='Solar Generation', alpha=0.8)
+axes[0].plot(time_axis, history["hb1_power"], color='#32CD32', linewidth=1, label='Battery Power', alpha=0.8)
+axes[0].fill_between(time_axis, 0, history["hb1_power"], where=np.array(history["hb1_power"])>0, color='#32CD32', alpha=0.2, label='Discharge')
+axes[0].fill_between(time_axis, 0, history["hb1_power"], where=np.array(history["hb1_power"])<0, color='#FF6347', alpha=0.2, label='Charge')
+axes[0].axhline(y=0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
+axes[0].set_ylabel("Power (kW)", fontweight='bold', color='black')
+axes[0].tick_params(axis='y', labelcolor='black')
+# Right y-axis: SOC
+ax0_right = axes[0].twinx()
+ax0_right.plot(time_axis, history["soc_hb1"], color='#1E90FF', linewidth=1.5, linestyle='--', label='Battery SOC', alpha=0.9)
+ax0_right.axhline(y=0.8, color='black', linestyle=':', linewidth=1, alpha=0.5)
+ax0_right.axhline(y=0.2, color='black', linestyle=':', linewidth=1, alpha=0.5)
+ax0_right.fill_between(time_axis, 0.2, 0.8, color='green', alpha=0.05)
+ax0_right.set_ylabel("Battery SOC (0-1)", fontweight='bold', color='#1E90FF')
+ax0_right.tick_params(axis='y', labelcolor='#1E90FF')
+ax0_right.set_ylim(0, 1.05)
+# Combined legend
+lines0, labels0 = axes[0].get_legend_handles_labels()
+lines0r, labels0r = ax0_right.get_legend_handles_labels()
+axes[0].legend(lines0 + lines0r, labels0 + labels0r, loc="upper left", bbox_to_anchor=(1.03, 1), framealpha=0.9, fontsize=6)
+axes[0].grid(True, alpha=0.3)
+
+# Subplot 2: Home 2 (Node 5) - Load, Solar, Battery Power (Left Axis), SOC (Right Axis)
+axes[1].set_title(f"Home at Node {HOME_BATTERY_INDICES[1]} - Load, Solar, Battery Operations & State of Charge(SoC)", fontsize=10, fontweight='bold')
+# Left y-axis: Power flows
+axes[1].plot(time_axis, history["hb2_load"], color='#1E90FF', linewidth=1, label='Load Demand', alpha=0.8)
+axes[1].plot(time_axis, history["hb2_solar"], color='#FF8C00', linewidth=1, label='Solar Generation', alpha=0.8)
+axes[1].plot(time_axis, history["hb2_power"], color='#32CD32', linewidth=1, label='Battery Power', alpha=0.8)
+axes[1].fill_between(time_axis, 0, history["hb2_power"], where=np.array(history["hb2_power"])>0, color='#32CD32', alpha=0.2, label='Discharge')
+axes[1].fill_between(time_axis, 0, history["hb2_power"], where=np.array(history["hb2_power"])<0, color='#FF6347', alpha=0.2, label='Charge')
+axes[1].axhline(y=0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
+axes[1].set_ylabel("Power (kW)", fontweight='bold', color='black')
+axes[1].set_xlabel("Time (Hours)", fontweight='bold')
+axes[1].tick_params(axis='y', labelcolor='black')
+# Right y-axis: SOC
+ax1_right = axes[1].twinx()
+ax1_right.plot(time_axis, history["soc_hb2"], color='#1E90FF', linewidth=1.5, linestyle='--', label='Battery SOC', alpha=0.9)
+ax1_right.axhline(y=0.8, color='black', linestyle=':', linewidth=1, alpha=0.5)
+ax1_right.axhline(y=0.2, color='black', linestyle=':', linewidth=1, alpha=0.5)
+ax1_right.fill_between(time_axis, 0.2, 0.8, color='green', alpha=0.05)
+ax1_right.set_ylabel("Battery SOC (0-1)", fontweight='bold', color='#1E90FF')
+ax1_right.tick_params(axis='y', labelcolor='#1E90FF')
+ax1_right.set_ylim(0, 1.05)
+# Combined legend
+lines1, labels1 = axes[1].get_legend_handles_labels()
+lines1r, labels1r = ax1_right.get_legend_handles_labels()
+axes[1].legend(lines1 + lines1r, labels1 + labels1r, loc="upper left", bbox_to_anchor=(1.03, 1), framealpha=0.9, fontsize=6)
+axes[1].grid(True, alpha=0.3)
+
+# Format x-axis
+for ax in axes:
+    ax.set_xticks(np.arange(0, 25, 2))
+    ax.set_xlim(0, 24)
+
+plt.subplots_adjust(left=0.06, bottom=0.08, right=0.85, top=0.95, hspace=0.25)
+output_file_3 = f"{SCENARIO_FOLDER}/1_5_home_batteries.png"
+plt.savefig(output_file_3, dpi=300, bbox_inches='tight')
+print(f"[OK] Saved '{output_file_3}'")
+
+# ==========================================
+# FIGURE 4: Voltage Profiles (All Nodes)
+# ==========================================
+print("[INFO] Generating Figure 4 (Voltage Profiles)...")
+fig4, axes = plt.subplots(3, 1, figsize=(16, 10), sharex=True)
 
 # Plot 1: BESS Node Voltage
 axes[0].set_title("Voltage at BESS Connection Point", fontsize=10, fontweight='bold')
@@ -298,15 +376,15 @@ for ax in axes:
     ax.set_xlim(0, 24)
 
 plt.subplots_adjust(left=0.05, bottom=0.08, right=0.85, top=0.94, hspace=0.22)
-output_file_3 = f"{SCENARIO_FOLDER}/2_voltage_profiles.png"
-plt.savefig(output_file_3, dpi=300, bbox_inches='tight')
-print(f"[OK] Saved '{output_file_3}'")
+output_file_4 = f"{SCENARIO_FOLDER}/2_voltage_profiles.png"
+plt.savefig(output_file_4, dpi=300, bbox_inches='tight')
+print(f"[OK] Saved '{output_file_4}'")
 
 # ==========================================
-# FIGURE 4: Economic Performance & Rewards
+# FIGURE 5: Economic Performance & Rewards
 # ==========================================
-print("[INFO] Generating Figure 4 (Economics & Rewards)...")
-fig4, axes = plt.subplots(2, 1, figsize=(16, 8), sharex=True)
+print("[INFO] Generating Figure 5 (Economics & Rewards)...")
+fig5, axes = plt.subplots(2, 1, figsize=(16, 8), sharex=True)
 
 # Plot 1: Cumulative Reward
 cumulative_rewards = np.cumsum(history["rewards"])
@@ -336,9 +414,9 @@ for ax in axes:
     ax.set_xlim(0, 24)
 
 plt.subplots_adjust(left=0.06, bottom=0.08, right=0.97, top=0.95, hspace=0.2)
-output_file_4 = f"{SCENARIO_FOLDER}/3_rewards.png"
-plt.savefig(output_file_4, dpi=300, bbox_inches='tight')
-print(f"[OK] Saved '{output_file_4}'")
+output_file_5 = f"{SCENARIO_FOLDER}/3_rewards.png"
+plt.savefig(output_file_5, dpi=300, bbox_inches='tight')
+print(f"[OK] Saved '{output_file_5}'")
 
 # ==========================================
 # EXPORT DATA

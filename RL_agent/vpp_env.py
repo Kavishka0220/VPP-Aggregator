@@ -312,18 +312,23 @@ class UrbanVPPEnv(gym.Env):
                     # Simplified: assume average surplus is spread across daytime hours
                     expected_surplus_energy = expected_daily_surplus * 0.25 * 0.95  # kWh with efficiency
                     
-                    # Calculate BESS charging need (from current SoC to 80%)
+                    # Calculate BESS charging need (from current SoC 0.2 to target 0.8)
                     target_soc = 0.8
+                    min_soc = 0.2  # Realistic minimum starting SoC
                     current_energy = bess_soc * self.bess_cap  # Current energy in kWh
                     target_energy = target_soc * self.bess_cap  # Target energy in kWh
                     energy_needed = max(0, target_energy - current_energy)  # How much energy needed
                     
-                    # Calculate deficit that solar can't provide
-                    energy_deficit = max(0, energy_needed - expected_surplus_energy)
-                    
-                    if energy_deficit > 2.0:  # More than 2 kWh deficit
-                        # Solar won't be enough - charge from grid at night
-                        # Calculate remaining night hours for charging (11pm-6am = up to 28 steps)
+                    # KEY LOGIC: Only charge at night if solar is INSUFFICIENT
+                    # If solar surplus >= energy needed, DON'T charge at night (skip grid charging)
+                    if expected_surplus_energy >= energy_needed:
+                        # Solar is ENOUGH to charge battery - don't consume grid power at night
+                        action_modified[bess_action_idx] = 0.0  # NO charging from grid
+                    else:
+                        # Solar is INSUFFICIENT - charge from grid at night to bridge deficit
+                        energy_deficit = energy_needed - expected_surplus_energy
+                        
+                        # Calculate remaining night hours for charging (12am-6am)
                         if hour >= 23:
                             # From 11pm to midnight + midnight to 6am
                             steps_until_6am = int((24 - hour) * 4 + 6 * 4)
@@ -338,15 +343,12 @@ class UrbanVPPEnv(gym.Env):
                         else:
                             charge_intensity = 0.5
                         action_modified[bess_action_idx] = -charge_intensity
-                    elif bess_soc < 0.3:
-                        # Solar will be enough, but SoC is critically low - small safety charge
-                        action_modified[bess_action_idx] = -0.3
                 else:
-                    # No solar surplus expected - charge aggressively at night
-                    if bess_soc < 0.3:
-                        action_modified[bess_action_idx] = -0.8  # Full charge
+                    # No solar surplus expected - charge from grid at night
+                    if bess_soc < 0.5:
+                        action_modified[bess_action_idx] = -0.6  # Moderate charge
                     else:
-                        action_modified[bess_action_idx] = -0.7  # High charge
+                        action_modified[bess_action_idx] = 0.0  # Don't charge if already sufficient
             else:
                 # Insufficient lookahead data - fallback to SoC-based charging
                 if bess_soc < 0.4:
@@ -473,9 +475,9 @@ class UrbanVPPEnv(gym.Env):
         
         if 6 <= hour < 18:         # Daytime / solar hours (6am-6pm)
             buy_price, sell_price = 35, 19  # LKR per kWh per 15-min
-        elif 18 <= hour < 23:      # Evening peak (6pm-11pm)
+        elif 18 <= hour < 23:      # Peak  (6pm-11pm)
             buy_price, sell_price = 67, 45  # LKR per kWh per 15-min
-        else:                      # Night (11pm-6am)
+        else:                      # Off-peak  (11pm-6am)
             buy_price, sell_price = 21, 0   # LKR per kWh per 15-min
 
         # Grid economics based on net injection (solar + battery - load)
@@ -527,7 +529,7 @@ class UrbanVPPEnv(gym.Env):
             
             if net_solar_surplus > 0:
                 # Solar surplus available: STRONG reward for charging from excess solar
-                daytime_solar_bonus += -8.0 * total_charge_power  # Strong solar charging
+                daytime_solar_bonus += -10.0 * total_charge_power  # Strong solar charging
                 
                 # Extra BESS bonus for absorbing community solar
                 bess_charge_power = np.minimum(0, self.node_battery_power_kw[self.bess_index])
@@ -536,20 +538,20 @@ class UrbanVPPEnv(gym.Env):
             
             
         
-        # ----- SECTION 2: EVENING PEAK (6pm-11pm) -----
-        # Strategy: Discharge at high prices to maximize revenue
-        evening_peak_bonus = 0.0
+        # ----- SECTION 2: PEAK (6pm-11pm) -----
+        # Strategy: Discharge at HIGH prices (67 LKR) to maximize revenue AND reduce evening peak demand
+        peak_bonus = 0.0
         if 18 <= hour < 23:  # Evening peak hours
             if np.mean(self.soc) > 0.3:  # Only discharge if battery has energy
                 total_discharge_power = np.sum(np.maximum(0, self.node_battery_power_kw))
                 # STRONG incentive to discharge at peak prices (67 LKR)
-                evening_peak_bonus = 10.0 * total_discharge_power
+                peak_bonus = 12.0 * total_discharge_power
         
-        # ----- SECTION 3: NIGHT (12am-6am) -----
+        # ----- SECTION 3: OFF-PEAK (11pm-6am) -----
         # Strategy: HOME batteries and BESS can charge at cheap rates (21 LKR)
         # BESS charges at night to supplement insufficient solar generation
         # NOTE: Charging blocked between 11pm-12am
-        night_charge_bonus = 0.0
+        offpeak_bonus = 0.0
         if hour < 6:  # Night hours (12am-6am only)
             # HOME BATTERY CHARGING
             home_batt_soc = [self.soc[0], self.soc[1]]  # Home batteries only
@@ -584,10 +586,10 @@ class UrbanVPPEnv(gym.Env):
                 # Decision based on solar forecast (only for home batteries)
                 if solar_will_be_sufficient:
                     # PENALTY: Don't charge from grid, save capacity for solar
-                    night_charge_bonus = 8.0 * home_charge_power
+                    offpeak_bonus = 8.0 * home_charge_power
                 else:
-                    # REWARD: Charge at cheap night rates (solar won't be enough)
-                    night_charge_bonus = -15.0 * home_charge_power
+                    # REWARD: Charge at cheap off-peak rates (solar won't be enough)
+                    offpeak_bonus = -15.0 * home_charge_power
             
             # BESS NIGHT CHARGING - Predictive Strategy
             # Reward BESS for intelligently pre-charging based on solar forecast
@@ -609,17 +611,17 @@ class UrbanVPPEnv(gym.Env):
                     energy_needed = (0.75 - bess_soc) * self.bess_cap
                     
                     if expected_surplus_energy < energy_needed:
-                        # Solar insufficient - STRONG reward for smart night charging
-                        night_charge_bonus += -18.0 * bess_charge_power
+                        # Solar insufficient - STRONG reward for smart off-peak charging
+                        offpeak_bonus += -18.0 * bess_charge_power
                     else:
-                        # Solar will be sufficient - moderate reward (still economical at 13c)
-                        night_charge_bonus += -8.0 * bess_charge_power
+                        # Solar will be sufficient - moderate reward (still economical at 21 LKR)
+                        offpeak_bonus += -8.0 * bess_charge_power
                 else:
                     # Not enough lookahead data - reward based on SoC state
                     if bess_soc < 0.4:
-                        night_charge_bonus += -15.0 * bess_charge_power
+                        offpeak_bonus += -15.0 * bess_charge_power
                     else:
-                        night_charge_bonus += -10.0 * bess_charge_power
+                        offpeak_bonus += -10.0 * bess_charge_power
 
         # B. Voltage Violation Penalty (0.94 to 1.06 p.u. limits)
         # Monitor all nodes for grid safety compliance (3-phase aware)
@@ -667,9 +669,9 @@ class UrbanVPPEnv(gym.Env):
         reward = (revenue 
                   - cost 
                   + voltage_penalty 
-                  + daytime_solar_bonus      # Daytime solar charging (6am-6pm)
-                  + evening_peak_bonus       # Evening peak discharge (6pm-11pm)
-                  + night_charge_bonus       # Night cheap charging (11pm-6am)
+                  + daytime_solar_bonus      # Daytime solar charging (6am-6pm) + morning peak shaving
+                  + peak_bonus               # Peak discharge (6pm-11pm)
+                  + offpeak_bonus            # Off-peak charging (11pm-6am)
                   + cycling_cost
                   + soc_health_penalty)
         

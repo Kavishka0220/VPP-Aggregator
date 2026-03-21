@@ -36,7 +36,7 @@ def main():
 
     # Set to a scenario name (e.g., "cloudy_day") to train on that specific scenario.
     # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
-    scenario_name = "intermittent_solar"  # Change to any scenario above
+    scenario_name = "low_load_weekend"  # Change to any scenario above
 
 
     

@@ -321,7 +321,7 @@ class UrbanVPPEnv(gym.Env):
                     # Calculate deficit that solar can't provide
                     energy_deficit = max(0, energy_needed - expected_surplus_energy)
                     
-                    if energy_deficit > 5.0:  # More than 5 kWh deficit
+                    if energy_deficit > 2.0:  # More than 2 kWh deficit
                         # Solar won't be enough - charge from grid at night
                         # Calculate remaining night hours for charging (11pm-6am = up to 28 steps)
                         if hour >= 23:
@@ -344,7 +344,7 @@ class UrbanVPPEnv(gym.Env):
                 else:
                     # No solar surplus expected - charge aggressively at night
                     if bess_soc < 0.3:
-                        action_modified[bess_action_idx] = -1.0  # Full charge
+                        action_modified[bess_action_idx] = -0.8  # Full charge
                     else:
                         action_modified[bess_action_idx] = -0.7  # High charge
             else:

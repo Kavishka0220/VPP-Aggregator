@@ -288,29 +288,29 @@ class UrbanVPPEnv(gym.Env):
             charge_intensity = min(1.0, net_solar_surplus / self.bess_power)
             action_modified[bess_action_idx] = -charge_intensity  # Negative = charging
         
-        # Strategy 2: Predictive charging from grid during cheap night rates (12am-6am, 21 LKR)
+        # Strategy 2: Predictive charging from grid during cheap off-peak rates (12pm-6am, 21 LKR)
         # Calculate if today's solar surplus will be sufficient to fully charge BESS
         # NOTE: Charging blocked between 11pm-12am
         elif hour < 6:
-            # Look ahead to predict today's solar surplus
+            # Look ahead to predict today's daytime solar surplus
             steps_remaining = self.max_steps - self.current_step
-            steps_until_evening = min(steps_remaining, int((18 - hour) * 4))  # Until 6pm
+            steps_until_peak = min(steps_remaining, int((18 - hour) * 4))  # Until peak (6pm)
             
-            if steps_until_evening > 4:  # Need at least 1 hour of data to predict
+            if steps_until_peak > 4:  # Need at least 1 hour of data to predict
                 # Get future solar and load data
-                future_solar = self.solar_episode[self.current_step:self.current_step + steps_until_evening]
-                future_load = self.load_episode[self.current_step:self.current_step + steps_until_evening]
+                future_solar = self.solar_episode[self.current_step:self.current_step + steps_until_peak]
+                future_load = self.load_episode[self.current_step:self.current_step + steps_until_peak]
                 
-                # Calculate total expected solar surplus throughout the day
+                # Calculate total expected solar surplus during daytime
                 future_solar_total = np.sum(future_solar)
                 future_load_total = np.sum(future_load)
-                expected_daily_surplus = future_solar_total - future_load_total
+                expected_daytime_surplus = future_solar_total - future_load_total
                 
-                if expected_daily_surplus > 0:
+                if expected_daytime_surplus > 0:
                     # Convert surplus energy to how much it can charge BESS
                     # Each 15-min step with surplus can charge: surplus_power * 0.25 hours * efficiency
                     # Simplified: assume average surplus is spread across daytime hours
-                    expected_surplus_energy = expected_daily_surplus * 0.25 * 0.95  # kWh with efficiency
+                    expected_surplus_energy = expected_daytime_surplus * 0.25 * 0.95  # kWh with efficiency
                     
                     # Calculate BESS charging need (from current SoC 0.2 to target 0.8)
                     target_soc = 0.8
@@ -319,34 +319,50 @@ class UrbanVPPEnv(gym.Env):
                     target_energy = target_soc * self.bess_cap  # Target energy in kWh
                     energy_needed = max(0, target_energy - current_energy)  # How much energy needed
                     
-                    # KEY LOGIC: Only charge at night if solar is INSUFFICIENT
-                    # If solar surplus >= energy needed, DON'T charge at night (skip grid charging)
+                    # KEY LOGIC: Only charge during off-peak if daytime solar is INSUFFICIENT
+                    # If daytime solar surplus >= energy needed, DON'T charge from grid during off-peak
                     if expected_surplus_energy >= energy_needed:
-                        # Solar is ENOUGH to charge battery - don't consume grid power at night
+                        # Daytime solar is ENOUGH to charge battery - don't consume grid power during off-peak
                         action_modified[bess_action_idx] = 0.0  # NO charging from grid
                     else:
-                        # Solar is INSUFFICIENT - charge from grid at night to bridge deficit
+                        # Daytime solar is INSUFFICIENT - charge from grid during off-peak to bridge deficit
                         energy_deficit = energy_needed - expected_surplus_energy
                         
-                        # Calculate remaining night hours for charging (12am-6am)
+                        # Calculate remaining off-peak hours for charging (11pm-6am)
                         if hour >= 23:
                             # From 11pm to midnight + midnight to 6am
-                            steps_until_6am = int((24 - hour) * 4 + 6 * 4)
+                            steps_until_daytime = int((24 - hour) * 4 + 6 * 4)
                         else:
                             # Already past midnight, just count to 6am
-                            steps_until_6am = int((6 - hour) * 4)
+                            steps_until_daytime = int((6 - hour) * 4)
                         
-                        if steps_until_6am > 0:
-                            # Spread deficit charging across remaining night hours
-                            power_per_step = energy_deficit / (steps_until_6am * 0.25)
+                        if steps_until_daytime > 0:
+                            # Spread deficit charging across remaining off-peak hours
+                            power_per_step = energy_deficit / (steps_until_daytime * 0.25)
                             charge_intensity = min(1.0, power_per_step / self.bess_power)
                         else:
                             charge_intensity = 0.5
                         action_modified[bess_action_idx] = -charge_intensity
                 else:
-                    # No solar surplus expected - charge from grid at night
-                    if bess_soc < 0.5:
-                        action_modified[bess_action_idx] = -0.6  # Moderate charge
+                    # No daytime solar surplus expected - charge from grid during off-peak
+                    # For solar unavailable days, MUST charge BESS fully since no daytime solar backup
+                    if bess_soc < 0.7:
+                        # Calculate how much charge is needed (target 0.75 for peak discharge)
+                        energy_deficit = (0.75 - bess_soc) * self.bess_cap  # kWh needed
+                        
+                        # Calculate remaining off-peak hours for charging (11pm-6am = 7 hours max)
+                        if hour >= 23:
+                            steps_until_daytime = int((24 - hour) * 4 + 6 * 4)
+                        else:
+                            steps_until_daytime = int((6 - hour) * 4)
+                        
+                        if steps_until_daytime > 0:
+                            # Spread charging across remaining off-peak hours
+                            power_per_step = energy_deficit / (steps_until_daytime * 0.25)
+                            charge_intensity = min(1.0, power_per_step / self.bess_power)
+                            action_modified[bess_action_idx] = -charge_intensity
+                        else:
+                            action_modified[bess_action_idx] = -0.8  # Strong charge if close to daytime
                     else:
                         action_modified[bess_action_idx] = 0.0  # Don't charge if already sufficient
             else:
@@ -380,13 +396,13 @@ class UrbanVPPEnv(gym.Env):
                 desired_power = 0.0  # Prevent charging when battery full
 
             # --- CONSTRAINT 2: BESS CHARGING STRATEGY ---
-            # BESS prefers solar but can use cheap night grid power (12am-6am)
-            # to ensure sufficient charge for evening peak
+            # BESS prefers solar but can use cheap off-peak grid power (11pm-6am)
+            # to ensure sufficient charge for peak hour discharge
             # NOTE: Charging blocked between 11pm-12am (hour 23-24)
             if is_bess and desired_power < 0:  # BESS trying to charge
-                # Allow charging if: (1) solar surplus available, OR (2) cheap night hours (12am-6am)
+                # Allow charging if: (1) solar surplus available, OR (2) cheap off-peak hours (12am-6am)
                 if net_solar_surplus <= 0 and (6 <= hour or hour >= 23):
-                    desired_power = 0.0  # Block grid charging outside night hours and during 11pm-12am
+                    desired_power = 0.0  # Block grid charging outside off-peak hours and during 11pm-12am
             
             # --- CONSTRAINT 3: Home Battery Daytime Solar Charging ---
             # Home batteries prefer solar during daytime but can use grid at night
@@ -538,7 +554,7 @@ class UrbanVPPEnv(gym.Env):
             else:
                 # NO solar surplus - penalize BESS discharge during daytime to save for peak hours
                 bess_discharge_power = np.maximum(0, self.node_battery_power_kw[self.bess_index])
-                daytime_solar_bonus -= 8.0 * bess_discharge_power  # Penalty for discharging BESS at low price
+                daytime_solar_bonus -= 10.0 * bess_discharge_power  # Penalty for discharging BESS at low price
             
             
         
@@ -553,10 +569,10 @@ class UrbanVPPEnv(gym.Env):
         
         # ----- SECTION 3: OFF-PEAK (11pm-6am) -----
         # Strategy: HOME batteries and BESS can charge at cheap rates (21 LKR)
-        # BESS charges at night to supplement insufficient solar generation
+        # BESS charges during off-peak to supplement insufficient daytime solar generation
         # NOTE: Charging blocked between 11pm-12am
         offpeak_bonus = 0.0
-        if hour < 6:  # Night hours (12am-6am only)
+        if hour < 6:  # Off-peak hours (12am-6am only)
             # HOME BATTERY CHARGING
             home_batt_soc = [self.soc[0], self.soc[1]]  # Home batteries only
             if np.mean(home_batt_soc) < 0.7:  # Room to charge
@@ -595,30 +611,30 @@ class UrbanVPPEnv(gym.Env):
                     # REWARD: Charge at cheap off-peak rates (solar won't be enough)
                     offpeak_bonus = -15.0 * home_charge_power
             
-            # BESS NIGHT CHARGING - Predictive Strategy
-            # Reward BESS for intelligently pre-charging based on solar forecast
+            # BESS OFF-PEAK CHARGING - Predictive Strategy
+            # Reward BESS for intelligently pre-charging based on daytime solar forecast
             bess_soc = self.soc[2]  # BESS SoC
-            bess_charge_power = self.node_battery_power_kw[self.bess_index]  # Node 10
+            bess_charge_power = self.node_battery_power_kw[self.bess_index]  # Node 21
             
             if bess_charge_power < 0:  # BESS is charging
-                # Look ahead to assess if this night charging is justified
+                # Look ahead to assess if this off-peak charging is justified
                 steps_remaining = self.max_steps - self.current_step
-                steps_until_evening = min(steps_remaining, int((18 - hour) * 4))
+                steps_until_peak = min(steps_remaining, int((18 - hour) * 4))
                 
-                if steps_until_evening > 4:
-                    future_solar = self.solar_episode[self.current_step:self.current_step + steps_until_evening]
-                    future_load = self.load_episode[self.current_step:self.current_step + steps_until_evening]
-                    expected_surplus = np.sum(future_solar) - np.sum(future_load)
+                if steps_until_peak > 4:
+                    future_solar = self.solar_episode[self.current_step:self.current_step + steps_until_peak]
+                    future_load = self.load_episode[self.current_step:self.current_step + steps_until_peak]
+                    expected_daytime_surplus = np.sum(future_solar) - np.sum(future_load)
                     
-                    # Calculate if solar will be sufficient
-                    expected_surplus_energy = expected_surplus * 0.25 * 0.95
+                    # Calculate if daytime solar will be sufficient
+                    expected_surplus_energy = expected_daytime_surplus * 0.25 * 0.95
                     energy_needed = (0.75 - bess_soc) * self.bess_cap
                     
                     if expected_surplus_energy < energy_needed:
-                        # Solar insufficient - STRONG reward for smart off-peak charging
+                        # Daytime solar insufficient - STRONG reward for smart off-peak charging
                         offpeak_bonus += -18.0 * bess_charge_power
                     else:
-                        # Solar will be sufficient - moderate reward (still economical at 21 LKR)
+                        # Daytime solar will be sufficient - moderate reward (still economical at 21 LKR)
                         offpeak_bonus += -8.0 * bess_charge_power
                 else:
                     # Not enough lookahead data - reward based on SoC state

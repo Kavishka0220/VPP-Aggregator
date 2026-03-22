@@ -407,7 +407,7 @@ class UrbanVPPEnv(gym.Env):
                     desired_power = 0.0  # Only allow off-peak (0am-6am) when no solar
             
             # --- CONSTRAINT 3: Home Battery Daytime Solar Charging ---
-            # Home batteries prefer solar during daytime but can use grid at night
+            # Home batteries prefer solar during daytime but MUST use it if available
             # During daytime hours, ONLY allow charging if there's excess solar
             if not is_bess and 6 <= hour < 18 and desired_power < 0:
                 if net_solar_surplus <= 0:  # No solar surplus available
@@ -554,27 +554,29 @@ class UrbanVPPEnv(gym.Env):
             
             if net_solar_surplus > 0:
                 # Solar surplus available: STRONG reward for charging from excess solar
-                daytime_solar_bonus += -10.0 * total_charge_power  # Strong solar charging
+                # Coefficient 26 represents the arbitrage profit (45 LKR peak - 19 LKR daytime export)
+                daytime_solar_bonus += 26.0 * (-total_charge_power)  # Reward proportional to arbitrage
                 
-                # Extra BESS bonus for absorbing community solar
+                # Extra incentive for BESS to absorb community solar (priority target)
                 bess_charge_power = np.minimum(0, self.node_battery_power_kw[self.bess_index])
                 surplus_factor = min(1.0, net_solar_surplus / 20.0)
-                daytime_solar_bonus += -10.0 * bess_charge_power * (1.0 + surplus_factor)
+                daytime_solar_bonus += 26.0 * (-bess_charge_power) * (1.0 + surplus_factor)
             else:
                 # NO solar surplus - penalize BESS discharge during daytime to save for peak hours
                 bess_discharge_power = np.maximum(0, self.node_battery_power_kw[self.bess_index])
-                daytime_solar_bonus -= 10.0 * bess_discharge_power  # Penalty for discharging BESS at low price
+                daytime_solar_bonus -= 26.0 * bess_discharge_power  # Penalty for losing arbitrage opportunity
             
             
         
         # ----- SECTION 2: PEAK (6pm-11pm) -----
-        # Strategy: Discharge at HIGH prices (67 LKR) to maximize revenue AND reduce evening peak demand
+        # Strategy: Discharge at HIGH prices to maximize revenue at peak demand times
+        # Peak discharge value = 45 LKR sell price (much higher than daytime 19 LKR)
         peak_bonus = 0.0
-        if 18 <= hour < 23:  # Evening peak hours
+        if 18 <= hour < 23:  # Evening peak hours (6pm-11pm)
             if np.mean(self.soc) > 0.3:  # Only discharge if battery has energy
                 total_discharge_power = np.sum(np.maximum(0, self.node_battery_power_kw))
-                peak_bonus = 12.0 * total_discharge_power
-                # STRONG incentive to discharge at peak prices (67 LKR) - prioritize over daytime discharge
+                # Reward peak discharge with coefficient 45 (reflects peak price)
+                peak_bonus = 45.0 * total_discharge_power
         
         # ----- SECTION 3: OFF-PEAK (11pm-6am) -----
         # Strategy: HOME batteries and BESS can charge at cheap rates (21 LKR)
@@ -608,8 +610,8 @@ class UrbanVPPEnv(gym.Env):
                         home_capacity = 2 * self.home_batt_cap
                         energy_needed = home_capacity * (0.75 - np.mean(home_batt_soc))
                         
-                        # If solar can provide 70%+ of needed energy, don't use grid
-                        if expected_surplus > energy_needed * 0.7:
+                        # If solar can provide 90%+ of needed energy, don't use grid
+                        if expected_surplus > energy_needed * 0.9:
                             solar_will_be_sufficient = True
                 
                 # Decision based on solar forecast (only for home batteries)

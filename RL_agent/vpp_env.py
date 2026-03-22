@@ -282,11 +282,30 @@ class UrbanVPPEnv(gym.Env):
         bess_action_idx = 2  # BESS is the third storage unit
         bess_soc = self.soc[bess_action_idx]
         
-        # Strategy 1: Charge from solar surplus when available
-        if net_solar_surplus > 0:
-            # Force BESS to charge from excess solar
+        # Strategy 1: Charge from solar surplus when available (PRIORITY)
+        if net_solar_surplus > 0 and bess_soc < 0.8:
+            # Solar surplus available and BESS not full - FORCE charging from solar
+            # This overrides RL agent action to prevent solar waste
             charge_intensity = min(1.0, net_solar_surplus / self.bess_power)
             action_modified[bess_action_idx] = -charge_intensity  # Negative = charging
+            if self.verbose:
+                print(f"[SOLAR_PRIORITY] Hour {(self.current_step % 96)/4:.1f}: Forced BESS charge from solar surplus {net_solar_surplus:.2f}kW (SoC {bess_soc:.2f})")
+        
+        # Strategy 1b: Also charge HOME batteries from solar surplus during daytime
+        if 6 <= hour < 18 and net_solar_surplus > 0:
+            # During daytime with solar surplus - force home batteries to charge
+            home_batt_avg_soc = np.mean([self.soc[0], self.soc[1]])
+            if home_batt_avg_soc < 0.75:
+                # Home batteries not full - share solar surplus with them
+                # Reduce BESS charge intensity to allow home batteries to charge from solar
+                total_home_batt_soc = self.soc[0] + self.soc[1]
+                home_charge_share = min(0.5, net_solar_surplus / 10.0)  # Home batteries get up to 50% of surplus (capped)
+                
+                for home_batt_idx, node_idx in enumerate(self.home_batt_indices):
+                    if self.soc[home_batt_idx] < 0.75:
+                        # Force home battery to charge from solar
+                        home_charge_intensity = min(0.6, home_charge_share / self.home_batt_power)
+                        action_modified[home_batt_idx] = -home_charge_intensity
         
         # Strategy 2: Predictive charging from grid during cheap off-peak rates (12pm-6am, 21 LKR)
         # Calculate if today's solar surplus will be sufficient to fully charge BESS
@@ -402,6 +421,16 @@ class UrbanVPPEnv(gym.Env):
                 # Always block charging during 11pm-12am transition
                 if 23 <= hour:
                     desired_power = 0.0
+                # PRIORITY: If there's solar surplus available, MUST use it, NOT grid
+                # Block ALL grid charging during daytime (6am-6pm) when solar surplus exists
+                elif 6 <= hour < 18 and net_solar_surplus > 0:
+                    # Solar surplus during daytime - charge from solar ONLY, not grid
+                    # Keep charging if BESS not full, set intensity based on surplus
+                    if self.soc[i] < 0.8:
+                        charge_intensity = min(1.0, net_solar_surplus / self.bess_power)
+                        desired_power = -charge_intensity * p_max  # Override to solar charging
+                    else:
+                        desired_power = 0.0  # BESS full, no charging
                 # Block grid charging outside off-peak if solar is insufficient
                 elif net_solar_surplus <= 0 and hour >= 6:
                     desired_power = 0.0  # Only allow off-peak (0am-6am) when no solar
@@ -409,8 +438,13 @@ class UrbanVPPEnv(gym.Env):
             # --- CONSTRAINT 3: Home Battery Daytime Solar Charging ---
             # Home batteries prefer solar during daytime but MUST use it if available
             # During daytime hours, ONLY allow charging if there's excess solar
-            if not is_bess and 6 <= hour < 18 and desired_power < 0:
-                if net_solar_surplus <= 0:  # No solar surplus available
+            if not is_bess and 6 <= hour < 18 and desired_power < 0:  # Home batt trying to charge
+                if net_solar_surplus > 0:
+                    # Force charging from solar surplus only - do not accept grid power
+                    charge_intensity = min(1.0, net_solar_surplus / self.home_batt_power)
+                    desired_power = -charge_intensity * p_max  # Lock to solar charging
+                elif net_solar_surplus <= 0:
+                    # No solar surplus available - block daytime grid charging
                     desired_power = 0.0  # Block daytime grid charging for home batteries
             
             # --- CONSTRAINT 4: Home Battery Discharge Strategy ---

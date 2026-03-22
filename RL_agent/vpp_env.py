@@ -290,6 +290,14 @@ class UrbanVPPEnv(gym.Env):
             action_modified[bess_action_idx] = -charge_intensity  # Negative = charging
             if self.verbose:
                 print(f"[SOLAR_PRIORITY] Hour {(self.current_step % 96)/4:.1f}: Forced BESS charge from solar surplus {net_solar_surplus:.2f}kW (SoC {bess_soc:.2f})")
+        elif net_solar_surplus > 0 and bess_soc >= 0.8:
+            # Solar surplus but BESS is FULL - this excess goes to grid or home batteries
+            if self.verbose:
+                print(f"[SOLAR_WASTE] Hour {(self.current_step % 96)/4:.1f}: Solar surplus {net_solar_surplus:.2f}kW but BESS FULL at SoC {bess_soc:.2f}")
+        elif net_solar_surplus <= 0 and 6 <= hour < 18:
+            # Daytime but NO solar surplus - BESS trying to discharge (should be blocked!)
+            if self.verbose:
+                print(f"[NO_SOLAR] Hour {(self.current_step % 96)/4:.1f}: No surplus (Solar={total_solar:.2f}, Load={total_load:.2f}), solar_surplus={net_solar_surplus:.2f}")
         
         # Strategy 1b: Also charge HOME batteries from solar surplus during daytime
         if 6 <= hour < 18 and net_solar_surplus > 0:
@@ -306,6 +314,8 @@ class UrbanVPPEnv(gym.Env):
                         # Force home battery to charge from solar
                         home_charge_intensity = min(0.6, home_charge_share / self.home_batt_power)
                         action_modified[home_batt_idx] = -home_charge_intensity
+                        if self.verbose:
+                            print(f"[HOME_SOLAR] Hour {(self.current_step % 96)/4:.1f}: Forcing Home Battery {home_batt_idx} to charge from solar at {home_charge_intensity:.2f} intensity")
         
         # Strategy 2: Predictive charging from grid during cheap off-peak rates (12pm-6am, 21 LKR)
         # Calculate if today's solar surplus will be sufficient to fully charge BESS
@@ -434,6 +444,15 @@ class UrbanVPPEnv(gym.Env):
                 # Block grid charging outside off-peak if solar is insufficient
                 elif net_solar_surplus <= 0 and hour >= 6:
                     desired_power = 0.0  # Only allow off-peak (0am-6am) when no solar
+                    
+            # CRITICAL: Prevent BESS DISCHARGE when there's solar surplus during daytime
+            # Stay charged for peak hours instead of wasting solar
+            if is_bess and desired_power > 0 and 6 <= hour < 18:  # BESS trying to discharge during daytime
+                if net_solar_surplus > 0:
+                    # Solar surplus available - BLOCK discharge, save battery for peak hours
+                    desired_power = 0.0
+                    if self.verbose:
+                        print(f"[BLOCK_DISCHARGE] Hour {(self.current_step % 96)/4:.1f}: Blocked BESS discharge during daytime with solar surplus {net_solar_surplus:.2f}kW")
             
             # --- CONSTRAINT 3: Home Battery Daytime Solar Charging ---
             # Home batteries prefer solar during daytime but MUST use it if available

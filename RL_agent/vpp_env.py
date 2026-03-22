@@ -396,13 +396,15 @@ class UrbanVPPEnv(gym.Env):
                 desired_power = 0.0  # Prevent charging when battery full
 
             # --- CONSTRAINT 2: BESS CHARGING STRATEGY ---
-            # BESS prefers solar but can use cheap off-peak grid power (11pm-6am)
+            # BESS prefers solar but can use cheap off-peak grid power (12am-6am, 21 LKR)
             # to ensure sufficient charge for peak hour discharge
-            # NOTE: Charging blocked between 11pm-12am (hour 23-24)
             if is_bess and desired_power < 0:  # BESS trying to charge
-                # Allow charging if: (1) solar surplus available, OR (2) cheap off-peak hours (12am-6am)
-                if net_solar_surplus <= 0 and (6 <= hour or hour >= 23):
-                    desired_power = 0.0  # Block grid charging outside off-peak hours and during 11pm-12am
+                # Always block charging during 11pm-12am transition
+                if 23 <= hour:
+                    desired_power = 0.0
+                # Block grid charging outside off-peak if solar is insufficient
+                elif net_solar_surplus <= 0 and hour >= 6:
+                    desired_power = 0.0  # Only allow off-peak (0am-6am) when no solar
             
             # --- CONSTRAINT 3: Home Battery Daytime Solar Charging ---
             # Home batteries prefer solar during daytime but can use grid at night

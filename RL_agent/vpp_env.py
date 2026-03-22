@@ -535,6 +535,10 @@ class UrbanVPPEnv(gym.Env):
                 bess_charge_power = np.minimum(0, self.node_battery_power_kw[self.bess_index])
                 surplus_factor = min(1.0, net_solar_surplus / 20.0)
                 daytime_solar_bonus += -10.0 * bess_charge_power * (1.0 + surplus_factor)
+            else:
+                # NO solar surplus - penalize BESS discharge during daytime to save for peak hours
+                bess_discharge_power = np.maximum(0, self.node_battery_power_kw[self.bess_index])
+                daytime_solar_bonus -= 8.0 * bess_discharge_power  # Penalty for discharging BESS at low price
             
             
         
@@ -544,8 +548,8 @@ class UrbanVPPEnv(gym.Env):
         if 18 <= hour < 23:  # Evening peak hours
             if np.mean(self.soc) > 0.3:  # Only discharge if battery has energy
                 total_discharge_power = np.sum(np.maximum(0, self.node_battery_power_kw))
-                # STRONG incentive to discharge at peak prices (67 LKR)
                 peak_bonus = 12.0 * total_discharge_power
+                # STRONG incentive to discharge at peak prices (67 LKR) - prioritize over daytime discharge
         
         # ----- SECTION 3: OFF-PEAK (11pm-6am) -----
         # Strategy: HOME batteries and BESS can charge at cheap rates (21 LKR)

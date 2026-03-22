@@ -21,7 +21,7 @@ STATS_PATH = os.path.join(script_dir, "checkpoints", "best_model", "vecnormalize
 OUTPUT_DIR = os.path.join(os.path.dirname(script_dir), "results_plots")  # Where to save plots
 
 steps_to_plot = 96  # One day (15 min intervals)
-SCENARIO_NAME = "Next_Day_Forecast_21_nodes" # Set to same as train.py (e.g. "heatwave_day") or None for default
+SCENARIO_NAME = "night_peak" # Set to same as train.py (e.g. "heatwave_day") or None for default
  
 # Node configuration
 SOLAR_NODE_INDICES = [3, 5, 7, 10, 11, 13, 15, 17, 18, 19, 20]
@@ -98,6 +98,13 @@ history = {
 }
 
 print("[INFO] Running simulation for 1 day (96 steps)...")
+
+# Check which home batteries actually exist in storage_map
+HOME_BATTERY_INDICES_AVAILABLE = [idx for idx in HOME_BATTERY_INDICES if idx in real_env.storage_map]
+print(f"[INFO] Available home batteries: {HOME_BATTERY_INDICES_AVAILABLE}")
+if len(HOME_BATTERY_INDICES_AVAILABLE) < len(HOME_BATTERY_INDICES):
+    print(f"[WARNING] Not all home batteries available. Using default 0 values for missing ones.")
+
 for step in range(steps_to_plot):
     action, _ = model.predict(obs, deterministic=True)
     obs, reward, dones, infos = env.step(action)
@@ -105,10 +112,20 @@ for step in range(steps_to_plot):
     reward_val = reward[0]
     done = dones[0]
     
-    # Collect data
+    # Collect data - handle missing home batteries
     history["soc_bess"].append(real_env.soc[real_env.storage_map.index(BESS_NODE_INDEX)])
-    history["soc_hb1"].append(real_env.soc[real_env.storage_map.index(HOME_BATTERY_INDICES[0])])
-    history["soc_hb2"].append(real_env.soc[real_env.storage_map.index(HOME_BATTERY_INDICES[1])])
+    
+    # Home Battery 1 (Node 3)
+    if HOME_BATTERY_INDICES[0] in real_env.storage_map:
+        history["soc_hb1"].append(real_env.soc[real_env.storage_map.index(HOME_BATTERY_INDICES[0])])
+    else:
+        history["soc_hb1"].append(0.0)  # Default to 0 if not present
+    
+    # Home Battery 2 (Node 5)
+    if HOME_BATTERY_INDICES[1] in real_env.storage_map:
+        history["soc_hb2"].append(real_env.soc[real_env.storage_map.index(HOME_BATTERY_INDICES[1])])
+    else:
+        history["soc_hb2"].append(0.0)  # Default to 0 if not present
     
     t = max(real_env.current_step-1, 0)
     solar_total = np.sum(real_env.solar_episode[t])
@@ -122,8 +139,17 @@ for step in range(steps_to_plot):
     history["hb2_load"].append(real_env.load_episode[t][HOME_BATTERY_INDICES[1]])
     history["hb2_solar"].append(real_env.solar_episode[t][HOME_BATTERY_INDICES[1]])
     
-    history["hb1_power"].append(real_env.node_battery_power_kw[HOME_BATTERY_INDICES[0]])
-    history["hb2_power"].append(real_env.node_battery_power_kw[HOME_BATTERY_INDICES[1]])
+    # Handle missing home batteries for power data
+    if HOME_BATTERY_INDICES[0] in real_env.storage_map:
+        history["hb1_power"].append(real_env.node_battery_power_kw[HOME_BATTERY_INDICES[0]])
+    else:
+        history["hb1_power"].append(0.0)  # Default to 0 if not present
+    
+    if HOME_BATTERY_INDICES[1] in real_env.storage_map:
+        history["hb2_power"].append(real_env.node_battery_power_kw[HOME_BATTERY_INDICES[1]])
+    else:
+        history["hb2_power"].append(0.0)  # Default to 0 if not present
+    
     history["bess_power"].append(real_env.node_battery_power_kw[BESS_NODE_INDEX])
     
     history["all_voltages"].append(real_env.voltages.copy())
@@ -168,8 +194,13 @@ ax1.plot(time_axis, history["solar"], color='orange', label='Solar Gen', linewid
 ax1.plot(time_axis, history["load"], color='blue', label='Load Demand', linewidth=1.5, alpha=0.7)
 ax1.bar(time_axis, history["bess_power"], color='green', width=0.2, label='BESS Power', alpha=0.7)
 ax1.plot(time_axis, history["bess_power"], color='green', label='BESS Power', alpha=0.5)
-ax1.plot(time_axis, history["hb1_power"], color='purple', linestyle='--', linewidth=1.2, label='Home Battery 1')
-ax1.plot(time_axis, history["hb2_power"], color='magenta', linestyle=':', linewidth=1.2, label='Home Battery 2')
+
+# Only plot home batteries if they exist
+if HOME_BATTERY_INDICES[0] in real_env.storage_map:
+    ax1.plot(time_axis, history["hb1_power"], color='purple', linestyle='--', linewidth=1.2, label='Home Battery 1')
+if HOME_BATTERY_INDICES[1] in real_env.storage_map:
+    ax1.plot(time_axis, history["hb2_power"], color='magenta', linestyle=':', linewidth=1.2, label='Home Battery 2')
+
 ax1.set_ylabel("Power (kW)", fontsize=8, fontweight='bold')
 ax1.legend(loc="upper left", bbox_to_anchor=(1.01, 1), fontsize=6)
 ax1.grid(True, alpha=0.3)
@@ -177,8 +208,13 @@ ax1.grid(True, alpha=0.3)
 # Plot 2: SoC
 ax2.set_title("Battery State of Charge", fontsize=10, fontweight='bold')
 ax2.plot(time_axis, history["soc_bess"], color='green', linewidth=1.8, label='Central BESS')
-ax2.plot(time_axis, history["soc_hb1"], color='purple', linestyle='--', linewidth=1.5, label='Home Battery 1')
-ax2.plot(time_axis, history["soc_hb2"], color='magenta', linestyle=':', linewidth=1.5, label='Home Battery 2')
+
+# Only plot home batteries if they exist
+if HOME_BATTERY_INDICES[0] in real_env.storage_map:
+    ax2.plot(time_axis, history["soc_hb1"], color='purple', linestyle='--', linewidth=1.5, label='Home Battery 1')
+if HOME_BATTERY_INDICES[1] in real_env.storage_map:
+    ax2.plot(time_axis, history["soc_hb2"], color='magenta', linestyle=':', linewidth=1.5, label='Home Battery 2')
+
 ax2.set_ylabel("SoC (0-1)", fontsize=8, fontweight='bold')
 ax2.set_ylim(0, 1.05)
 ax2.set_xlabel("Time (Hours)", fontsize=8, fontweight='bold')
@@ -253,77 +289,70 @@ print(f"[OK] Saved '{output_file_2}'")
 
 # ==========================================
 # ==========================================
-# FIGURE 3: Home Batteries - Detailed Per-Home Analysis
+# FIGURE 3: Home Batteries - Detailed Per-Home Analysis (if available)
 # ==========================================
-print("[INFO] Generating Figure 3 (Home Batteries Details)...")
-fig3, axes = plt.subplots(2, 1, figsize=(16, 10), sharex=True)
-
-# Subplot 1: Home 1 (Node 3) - Load, Solar, Battery Power (Left Axis), SOC (Right Axis)
-axes[0].set_title(f"Home at Node {HOME_BATTERY_INDICES[0]} - Load, Solar, Battery Operations & State of Charge", fontsize=10, fontweight='bold')
-# Left y-axis: Power flows
-axes[0].plot(time_axis, history["hb1_load"], color='#1E90FF', linewidth=1, label='Load Demand', alpha=0.8)
-axes[0].plot(time_axis, history["hb1_solar"], color='#FF8C00', linewidth=1, label='Solar Generation', alpha=0.8)
-axes[0].fill_between(time_axis, 0, history["hb1_load"], color='#1E90FF', alpha=0.2)
-axes[0].fill_between(time_axis, 0, history["hb1_solar"], color='#FF8C00', alpha=0.2)
-axes[0].plot(time_axis, history["hb1_power"], color='#32CD32', linewidth=1, label='Battery Power', alpha=0.8)
-axes[0].fill_between(time_axis, 0, history["hb1_power"], where=np.array(history["hb1_power"])>0, color='#32CD32', alpha=0.2, label='Discharge')
-axes[0].fill_between(time_axis, 0, history["hb1_power"], where=np.array(history["hb1_power"])<0, color='#FF6347', alpha=0.2, label='Charge')
-axes[0].axhline(y=0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
-axes[0].set_ylabel("Power (kW)", fontweight='bold', color='black')
-axes[0].tick_params(axis='y', labelcolor='black')
-# Right y-axis: SOC
-ax0_right = axes[0].twinx()
-ax0_right.plot(time_axis, history["soc_hb1"], color='#1E90FF', linewidth=1.5, linestyle='--', label='Battery SOC', alpha=0.9)
-ax0_right.axhline(y=0.8, color='black', linestyle=':', linewidth=1, alpha=0.5)
-ax0_right.axhline(y=0.2, color='black', linestyle=':', linewidth=1, alpha=0.5)
-#ax0_right.fill_between(time_axis, 0.2, 0.8, color='green', alpha=0.05)
-ax0_right.set_ylabel("Battery SOC (0-1)", fontweight='bold', color='#1E90FF')
-ax0_right.tick_params(axis='y', labelcolor='#1E90FF')
-ax0_right.set_ylim(0, 1.05)
-# Combined legend
-lines0, labels0 = axes[0].get_legend_handles_labels()
-lines0r, labels0r = ax0_right.get_legend_handles_labels()
-axes[0].legend(lines0 + lines0r, labels0 + labels0r, loc="upper left", bbox_to_anchor=(1.03, 1), framealpha=0.9, fontsize=6)
-axes[0].grid(True, alpha=0.3)
-
-# Subplot 2: Home 2 (Node 5) - Load, Solar, Battery Power (Left Axis), SOC (Right Axis)
-axes[1].set_title(f"Home at Node {HOME_BATTERY_INDICES[1]} - Load, Solar, Battery Operations & State of Charge(SoC)", fontsize=10, fontweight='bold')
-# Left y-axis: Power flows
-axes[1].plot(time_axis, history["hb2_load"], color='#1E90FF', linewidth=1, label='Load Demand', alpha=0.8)
-axes[1].plot(time_axis, history["hb2_solar"], color='#FF8C00', linewidth=1, label='Solar Generation', alpha=0.8)
-axes[1].fill_between(time_axis, 0, history["hb2_load"], color='#1E90FF', alpha=0.2)
-axes[1].fill_between(time_axis, 0, history["hb2_solar"], color='#FF8C00', alpha=0.2)
-axes[1].plot(time_axis, history["hb2_power"], color='#32CD32', linewidth=1, label='Battery Power', alpha=0.8)
-axes[1].fill_between(time_axis, 0, history["hb2_power"], where=np.array(history["hb2_power"])>0, color='#32CD32', alpha=0.2, label='Discharge')
-axes[1].fill_between(time_axis, 0, history["hb2_power"], where=np.array(history["hb2_power"])<0, color='#FF6347', alpha=0.2, label='Charge')
-axes[1].axhline(y=0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
-axes[1].set_ylabel("Power (kW)", fontweight='bold', color='black')
-axes[1].set_xlabel("Time (Hours)", fontweight='bold')
-axes[1].tick_params(axis='y', labelcolor='black')
-# Right y-axis: SOC
-ax1_right = axes[1].twinx()
-ax1_right.plot(time_axis, history["soc_hb2"], color='#1E90FF', linewidth=1.5, linestyle='--', label='Battery SOC', alpha=0.9)
-ax1_right.axhline(y=0.8, color='black', linestyle=':', linewidth=1, alpha=0.5)
-ax1_right.axhline(y=0.2, color='black', linestyle=':', linewidth=1, alpha=0.5)
-#ax1_right.fill_between(time_axis, 0.2, 0.8, color='green', alpha=0.05)
-ax1_right.set_ylabel("Battery SOC (0-1)", fontweight='bold', color='#1E90FF')
-ax1_right.tick_params(axis='y', labelcolor='#1E90FF')
-ax1_right.set_ylim(0, 1.05)
-# Combined legend
-lines1, labels1 = axes[1].get_legend_handles_labels()
-lines1r, labels1r = ax1_right.get_legend_handles_labels()
-axes[1].legend(lines1 + lines1r, labels1 + labels1r, loc="upper left", bbox_to_anchor=(1.03, 1), framealpha=0.9, fontsize=6)
-axes[1].grid(True, alpha=0.3)
-
-# Format x-axis
-for ax in axes:
-    ax.set_xticks(np.arange(0, 25, 2))
-    ax.set_xlim(0, 24)
-
-plt.subplots_adjust(left=0.06, bottom=0.08, right=0.85, top=0.95, hspace=0.25)
-output_file_3 = f"{SCENARIO_FOLDER}/1_5_home_batteries.png"
-plt.savefig(output_file_3, dpi=300, bbox_inches='tight')
-print(f"[OK] Saved '{output_file_3}'")
+# Only create this plot if at least one home battery exists
+if len(HOME_BATTERY_INDICES_AVAILABLE) > 0:
+    print("[INFO] Generating Figure 3 (Home Batteries Details)...")
+    fig3, axes = plt.subplots(len(HOME_BATTERY_INDICES_AVAILABLE), 1, figsize=(16, 5 * len(HOME_BATTERY_INDICES_AVAILABLE)), sharex=True)
+    
+    # Ensure axes is always a list (in case of single subplot)
+    if len(HOME_BATTERY_INDICES_AVAILABLE) == 1:
+        axes = [axes]
+    
+    # Plot each available home battery
+    for plot_idx, home_battery_idx in enumerate(HOME_BATTERY_INDICES_AVAILABLE):
+        ax = axes[plot_idx]
+        
+        if home_battery_idx == HOME_BATTERY_INDICES[0]:
+            hb_data = {"load": history["hb1_load"], "solar": history["hb1_solar"], "power": history["hb1_power"], "soc": history["soc_hb1"]}
+        else:
+            hb_data = {"load": history["hb2_load"], "solar": history["hb2_solar"], "power": history["hb2_power"], "soc": history["soc_hb2"]}
+        
+        ax.set_title(f"Home at Node {home_battery_idx} - Load, Solar, Battery Operations & State of Charge", fontsize=10, fontweight='bold')
+        
+        # Left y-axis: Power flows
+        ax.plot(time_axis, hb_data["load"], color='#1E90FF', linewidth=1, label='Load Demand', alpha=0.8)
+        ax.plot(time_axis, hb_data["solar"], color='#FF8C00', linewidth=1, label='Solar Generation', alpha=0.8)
+        ax.fill_between(time_axis, 0, hb_data["load"], color='#1E90FF', alpha=0.2)
+        ax.fill_between(time_axis, 0, hb_data["solar"], color='#FF8C00', alpha=0.2)
+        ax.plot(time_axis, hb_data["power"], color='#32CD32', linewidth=1, label='Battery Power', alpha=0.8)
+        ax.fill_between(time_axis, 0, hb_data["power"], where=np.array(hb_data["power"])>0, color='#32CD32', alpha=0.2, label='Discharge')
+        ax.fill_between(time_axis, 0, hb_data["power"], where=np.array(hb_data["power"])<0, color='#FF6347', alpha=0.2, label='Charge')
+        ax.axhline(y=0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
+        ax.set_ylabel("Power (kW)", fontweight='bold', color='black')
+        ax.tick_params(axis='y', labelcolor='black')
+        
+        # Right y-axis: SOC
+        ax_right = ax.twinx()
+        ax_right.plot(time_axis, hb_data["soc"], color='#1E90FF', linewidth=1.5, linestyle='--', label='Battery SOC', alpha=0.9)
+        ax_right.axhline(y=0.8, color='black', linestyle=':', linewidth=1, alpha=0.5)
+        ax_right.axhline(y=0.2, color='black', linestyle=':', linewidth=1, alpha=0.5)
+        ax_right.set_ylabel("Battery SOC (0-1)", fontweight='bold', color='#1E90FF')
+        ax_right.tick_params(axis='y', labelcolor='#1E90FF')
+        ax_right.set_ylim(0, 1.05)
+        
+        # Combined legend
+        lines, labels = ax.get_legend_handles_labels()
+        lines_r, labels_r = ax_right.get_legend_handles_labels()
+        ax.legend(lines + lines_r, labels + labels_r, loc="upper left", bbox_to_anchor=(1.03, 1), framealpha=0.9, fontsize=6)
+        ax.grid(True, alpha=0.3)
+        
+        if plot_idx == len(HOME_BATTERY_INDICES_AVAILABLE) - 1:
+            ax.set_xlabel("Time (Hours)", fontweight='bold')
+    
+    # Format x-axis
+    for ax in axes:
+        ax.set_xticks(np.arange(0, 25, 2))
+        ax.set_xlim(0, 24)
+    
+    plt.subplots_adjust(left=0.06, bottom=0.08, right=0.85, top=0.95, hspace=0.25)
+    output_file_3 = f"{SCENARIO_FOLDER}/1_5_home_batteries.png"
+    plt.savefig(output_file_3, dpi=300, bbox_inches='tight')
+    print(f"[OK] Saved '{output_file_3}'")
+else:
+    print("[INFO] Skipping Figure 3 - No home batteries available")
+    output_file_3 = None
 
 # ==========================================
 # FIGURE 4: Voltage Profiles (All Nodes)

@@ -43,12 +43,12 @@ class UrbanVPPEnv(gym.Env):
             raise ValueError(f"Solar indices must be in range [0, 20]. Got: {self.solar_indices}")
         
         # Which nodes have Batteries?
-        self.home_batt_indices = [3, 5]  # Home Batteries at nodes 3 & 5
+        self.home_batt_indices = [3]  # Home Batteries at nodes 3 & 5
         self.bess_index = 21  # BESS at node 21 (end of feeder)
         
         # Map actions to physical nodes: Action[0]->Node3, Action[1]->Node5, Action[2]->Node21(BESS)
         self.storage_map = self.home_batt_indices + [self.bess_index]
-        self.n_storage_units = 3
+        self.n_storage_units = len(self.storage_map)  # Calculate from storage_map, not hardcoded
         
         # Specs
         self.home_batt_cap = 13.5 # kWh
@@ -78,8 +78,8 @@ class UrbanVPPEnv(gym.Env):
         self.state = None
         self.current_step = 0
         self.max_steps = 96
-        self.soc = np.ones(3) * 0.5 
-        self.prev_batt_power = np.zeros(3)
+        self.soc = np.ones(self.n_storage_units) * 0.5 
+        self.prev_batt_power = np.zeros(self.n_storage_units)
         # We need 22 voltage values internally (for 3-phase monitoring)
         self.voltages = np.ones(self.n_nodes, dtype=np.float32)      # Min voltage per bus (RL sees this)
         self.voltages_min = np.ones(self.n_nodes, dtype=np.float32)  # For undervoltage checking

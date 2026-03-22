@@ -91,7 +91,7 @@ new generator.PV20  bus1=N20.1.2.3 phases=3 kv=0.4 kw=0 model=1
 ! ========= STORAGE (home_batt_indices = [3,5], bess_index = 21) =========
 new storage.Batt3 bus1=N3.1.2.3 phases=3 kv=0.4 kwrated=5  kwhrated=13.5 %stored=50 state=idling dispmode=External %effcharge=95 %effdischarge=95
 new storage.Batt5 bus1=N5.3 phases=1 kv=0.23 kwrated=5  kwhrated=13.5 %stored=50 state=idling dispmode=External %effcharge=95 %effdischarge=95
-new storage.BESS  bus1=NBESS.1.2.3 phases=3 kv=0.4 kwrated=40 kwhrated=120 %stored=50 state=idling dispmode=External %effcharge=95 %effdischarge=95
+new storage.BESS  bus1=NBESS.1.2.3 phases=3 kv=0.4 kwrated=40 kwhrated=200 %stored=50 state=idling dispmode=External %effcharge=95 %effdischarge=95
 
 set voltagebases=[0.4]
 calcvoltagebases

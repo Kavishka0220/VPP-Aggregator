@@ -413,7 +413,14 @@ class UrbanVPPEnv(gym.Env):
                 if net_solar_surplus <= 0:  # No solar surplus available
                     desired_power = 0.0  # Block daytime grid charging for home batteries
             
-            # --- CONSTRAINT 4: Block all battery charging between 11pm-12am ---
+            # --- CONSTRAINT 4: Home Battery Discharge Strategy ---
+            # Home batteries should ONLY discharge during peak hours (6pm-11pm, 67 LKR)
+            # Save them for when grid prices are highest, avoid daytime/off-peak discharge
+            if not is_bess and desired_power > 0:  # Home battery trying to discharge
+                if not (18 <= hour < 23):  # NOT during peak hours (6pm-11pm)
+                    desired_power = 0.0  # Block discharge outside peak - save for expensive hours
+            
+            # --- CONSTRAINT 5: Block all battery charging between 11pm-12am ---
             if 23 <= hour < 24 and desired_power < 0:
                 desired_power = 0.0  # No charging allowed between 11pm-12am
             

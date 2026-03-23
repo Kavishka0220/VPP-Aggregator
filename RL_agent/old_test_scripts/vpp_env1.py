@@ -16,37 +16,43 @@ from openDSS.run_opendss import VPPDSSRunner
 class UrbanVPPEnv(gym.Env):
     """
     Final Thesis VPP Environment
-    - Constraints: Voltage must be between 0.9 and 1.1 p.u.
-    - Inputs: Common Solar, 10 Loads, 11 Node Voltages, 3 SoCs, Time.
+    - Constraints: Voltage must be between 0.94 and 1.06 p.u.
+    - Inputs: Common Solar, 21 Loads, 22 Node Voltages, 3 SoCs, Time.
     """
     
     metadata = {'render_modes': []}
     
-    def __init__(self, data_path="./data", scenario_name=None, start_index=None):
+    def __init__(self, data_path="./data", scenario_name=None, start_index=None, verbose=False):
         super(UrbanVPPEnv, self).__init__()
         
         # Testing configuration
+        self.verbose = verbose
         self.default_start_index = start_index
 
         # Initialize OpenDSS Runner
         dss_file = os.path.join(parent_dir, "openDSS", "feeder_houses.dss")
         self.dss_runner = VPPDSSRunner(dss_file)
         self.dss_runner.compile()  # Compile circuit at initialization
-
-        # --- 1. SYSTEM CONFIGURATION ---
-        self.n_nodes = 11  # 10 Houses (0-9) + 1 BESS Node (10)
-        self.solar_indices = [0, 1, 2, 4, 6, 8]  # Which house nodes have solar panels
-        # Which nodes have Batteries?
-        self.home_batt_indices = [0, 2]  # Home Batteries at nodes 0 & 2
-        self.bess_index = 10  # BESS at node 10
         
-        # Map actions to physical nodes: Action[0]->Node0, Action[1]->Node2, Action[2]->Node10(BESS)
+        # --- 1. SYSTEM CONFIGURATION ---
+        self.n_nodes = 22  # 21 Houses (L0-L20) + 1 BESS Node (21)
+        self.solar_indices = [3, 5, 7, 10, 11, 13, 15, 17, 18, 19, 20]  # 11 nodes have solar panels
+        
+        # Validate solar indices
+        if not all(0 <= idx < 21 for idx in self.solar_indices):
+            raise ValueError(f"Solar indices must be in range [0, 20]. Got: {self.solar_indices}")
+        
+        # Which nodes have Batteries?
+        self.home_batt_indices = [3, 5]  # Home Batteries at nodes 3 & 5
+        self.bess_index = 21  # BESS at node 21 (end of feeder)
+        
+        # Map actions to physical nodes: Action[0]->Node3, Action[1]->Node5, Action[2]->Node21(BESS)
         self.storage_map = self.home_batt_indices + [self.bess_index]
-        self.n_storage_units = 3
-
+        self.n_storage_units = len(self.storage_map)  # Calculate from storage_map, not hardcoded
+        
         # Specs
         self.home_batt_cap = 13.5 # kWh
-        self.bess_cap = 120.0 # kWh
+        self.bess_cap = 200.0 # kWh
         self.home_batt_power = 5.0 # kW
         self.bess_power = 40.0 # kW
 
@@ -60,8 +66,8 @@ class UrbanVPPEnv(gym.Env):
         )
 
         # --- 3. OBSERVATION SPACE ---
-        # 1(Solar) + 10(Loads) + 11(All Node Voltages) + 3(SoCs) + 4(Time) = 29
-        self.obs_size = 29
+        # 1(Solar) + 21(Loads) + 22(All Node Voltages) + 3(SoCs) + 4(Time) = 51
+        self.obs_size = 51
         self.observation_space = spaces.Box(
             #low=-np.inf, high=np.inf,
             low=-5, high=5,
@@ -72,9 +78,9 @@ class UrbanVPPEnv(gym.Env):
         self.state = None
         self.current_step = 0
         self.max_steps = 96
-        self.soc = np.ones(3) * 0.5 
-        self.prev_batt_power = np.zeros(3)
-        # We need 11 voltage values internally (for 3-phase monitoring)
+        self.soc = np.ones(self.n_storage_units) * 0.5 
+        self.prev_batt_power = np.zeros(self.n_storage_units)
+        # We need 22 voltage values internally (for 3-phase monitoring)
         self.voltages = np.ones(self.n_nodes, dtype=np.float32)      # Min voltage per bus (RL sees this)
         self.voltages_min = np.ones(self.n_nodes, dtype=np.float32)  # For undervoltage checking
         self.voltages_max = np.ones(self.n_nodes, dtype=np.float32)  # For overvoltage checking
@@ -83,13 +89,31 @@ class UrbanVPPEnv(gym.Env):
         try:
             if scenario_name:
                 scenario_folder = os.path.join(data_path, "forecast_scenarios")
+                solar_file = os.path.join(scenario_folder, f"solar_{scenario_name}.csv")
+                load_file = os.path.join(scenario_folder, f"load_{scenario_name}.csv")
+                
+                # Verify files exist
+                if not os.path.exists(solar_file):
+                    raise FileNotFoundError(f"Scenario file not found: {solar_file}")
+                if not os.path.exists(load_file):
+                    raise FileNotFoundError(f"Scenario file not found: {load_file}")
+                
                 print(f"[INFO] Loading Scenario: {scenario_name}")
-                self.solar_df = pd.read_csv(f"{scenario_folder}/solar_{scenario_name}.csv")
-                self.load_df = pd.read_csv(f"{scenario_folder}/load_{scenario_name}.csv")
+                if self.verbose:
+                    print(f"[DEBUG] Solar file: {solar_file}")
+                    print(f"[DEBUG] Load file: {load_file}")
+                self.solar_df = pd.read_csv(solar_file)
+                self.load_df = pd.read_csv(load_file)
             else:
-                # These files contain 10 columns (House 0 to House 9)
-                self.solar_df = pd.read_csv(f"{data_path}/solar_forecast_formatted.csv")
-                self.load_df = pd.read_csv(f"{data_path}/load_forecast.csv")
+                # These files contain 21 columns (House 0 to House 20)
+                solar_file = os.path.join(data_path, "solar_forecast_formatted.csv")
+                load_file = os.path.join(data_path, "load_forecast.csv")
+                print(f"[INFO] Loading default data files")
+                if self.verbose:
+                    print(f"[DEBUG] Solar file: {solar_file}")
+                    print(f"[DEBUG] Load file: {load_file}")
+                self.solar_df = pd.read_csv(solar_file)
+                self.load_df = pd.read_csv(load_file)
             
             # Clean and validate data - handle various CSV formats
             # Process solar dataframe
@@ -105,12 +129,12 @@ class UrbanVPPEnv(gym.Env):
             # Drop any completely empty columns
             self.solar_df = self.solar_df.dropna(axis=1, how='all')
             
-            # Select only first 10 columns if more exist
-            if self.solar_df.shape[1] > 10:
-                print(f"[WARNING] solar has {self.solar_df.shape[1]} columns, using first 10")
-                self.solar_df = self.solar_df.iloc[:, :10]
-            elif self.solar_df.shape[1] < 10:
-                raise ValueError(f"solar has only {self.solar_df.shape[1]} columns, need 10")
+            # Select only first 21 columns if more exist
+            if self.solar_df.shape[1] > 21:
+                print(f"[WARNING] solar has {self.solar_df.shape[1]} columns, using first 21")
+                self.solar_df = self.solar_df.iloc[:, :21]
+            elif self.solar_df.shape[1] < 21:
+                raise ValueError(f"solar has only {self.solar_df.shape[1]} columns, need 21")
             
             # Process load dataframe
             # Drop timestamp/date columns
@@ -125,16 +149,16 @@ class UrbanVPPEnv(gym.Env):
             # Drop any completely empty columns
             self.load_df = self.load_df.dropna(axis=1, how='all')
             
-            # Select only first 10 columns if more exist
-            if self.load_df.shape[1] > 10:
-                print(f"[WARNING] load has {self.load_df.shape[1]} columns, using first 10")
-                self.load_df = self.load_df.iloc[:, :10]
-            elif self.load_df.shape[1] < 10:
-                raise ValueError(f"load has only {self.load_df.shape[1]} columns, need 10")
+            # Select only first 21 columns if more exist
+            if self.load_df.shape[1] > 21:
+                print(f"[WARNING] load has {self.load_df.shape[1]} columns, using first 21")
+                self.load_df = self.load_df.iloc[:, :21]
+            elif self.load_df.shape[1] < 21:
+                raise ValueError(f"load has only {self.load_df.shape[1]} columns, need 21")
             
             # Final validation
-            if self.solar_df.shape[1] != 10 or self.load_df.shape[1] != 10:
-                raise ValueError(f"Data must have 10 columns. Got solar: {self.solar_df.shape[1]}, load: {self.load_df.shape[1]}")
+            if self.solar_df.shape[1] != 21 or self.load_df.shape[1] != 21:
+                raise ValueError(f"Data must have 21 columns. Got solar: {self.solar_df.shape[1]}, load: {self.load_df.shape[1]}")
             
             # Handle potential length mismatch (e.g., Load is 1 day, Solar is 1 year)
             len_solar = len(self.solar_df)
@@ -171,12 +195,21 @@ class UrbanVPPEnv(gym.Env):
             if len(self.solar_df) < self.max_steps:
                 raise ValueError(f"Data must have at least {self.max_steps} rows. Got: {len(self.solar_df)}")
             
-            print(f"[OK] Data Loaded Successfully! Final Length: {len(self.solar_df)}")
-        except FileNotFoundError:
+            # Log final verification
+            scenario_info = f"Scenario: {scenario_name}" if scenario_name else "Default data"
+            print(f"[OK] Data Loaded Successfully! {scenario_info}")
+            if self.verbose:
+                print(f"[OK] Solar shape: {self.solar_df.shape}, Load shape: {self.load_df.shape}")
+                print(f"[OK] Final Length: {len(self.solar_df)}")
+                print(f"[DEBUG] Solar sample (first row): {self.solar_df.iloc[0].values[:5]}...")
+                print(f"[DEBUG] Load sample (first row): {self.load_df.iloc[0].values[:5]}...")
+        except FileNotFoundError as e:
             # Fallback dummy data
-            print("[WARNING] Using dummy random data")
-            self.solar_df = pd.DataFrame(np.random.rand(1000, 10) * 5.0)
-            self.load_df = pd.DataFrame(np.random.rand(1000, 10) * 3.0)    
+            print(f"[WARNING] File loading error: {e}")
+            print("[WARNING] Using dummy random data due to file loading error.")
+            print("[WARNING] This is a fallback - verify your data_path and scenario_name!")
+            self.solar_df = pd.DataFrame(np.random.rand(1000, 21) * 5.0)
+            self.load_df = pd.DataFrame(np.random.rand(1000, 21) * 3.0)    
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -212,9 +245,9 @@ class UrbanVPPEnv(gym.Env):
         self.solar_episode = self.solar_df.iloc[self.start_idx : self.start_idx + self.max_steps].values
         self.load_episode = self.load_df.iloc[self.start_idx : self.start_idx + self.max_steps].values
         
-        # Apply Mask (Only keep solar for nodes with panels: 0,1,2,4,6,8)
+        # Apply Mask (Only keep solar for nodes with panels: 3,5,7,10,11,13,15,17,18,19,20)
         # Even if CSV has data for all houses, we zero out houses without panels
-        self.solar_mask = np.zeros(10)
+        self.solar_mask = np.zeros(21)
         self.solar_mask[self.solar_indices] = 1.0
         self.solar_episode = self.solar_episode * self.solar_mask
 
@@ -227,8 +260,8 @@ class UrbanVPPEnv(gym.Env):
         full_load_profile = np.zeros(self.n_nodes) 
 
         # Fill with current step data
-        full_solar_profile[:10] = self.solar_episode[self.current_step]
-        full_load_profile[:10] = self.load_episode[self.current_step]
+        full_solar_profile[:21] = self.solar_episode[self.current_step]
+        full_load_profile[:21] = self.load_episode[self.current_step]
 
         # Calculate Limits
         total_load = np.sum(full_load_profile)
@@ -249,71 +282,118 @@ class UrbanVPPEnv(gym.Env):
         bess_action_idx = 2  # BESS is the third storage unit
         bess_soc = self.soc[bess_action_idx]
         
-        # Strategy 1: Charge from solar surplus when available
-        if net_solar_surplus > 0:
-            # Force BESS to charge from excess solar
+        # Strategy 1: Charge from solar surplus when available (PRIORITY)
+        if net_solar_surplus > 0 and bess_soc < 0.8:
+            # Solar surplus available and BESS not full - FORCE charging from solar
+            # This overrides RL agent action to prevent solar waste
             charge_intensity = min(1.0, net_solar_surplus / self.bess_power)
             action_modified[bess_action_idx] = -charge_intensity  # Negative = charging
+            if self.verbose:
+                print(f"[SOLAR_PRIORITY] Hour {(self.current_step % 96)/4:.1f}: Forced BESS charge from solar surplus {net_solar_surplus:.2f}kW (SoC {bess_soc:.2f})")
+        elif net_solar_surplus > 0 and bess_soc >= 0.8:
+            # Solar surplus but BESS is FULL - this excess goes to grid or home batteries
+            if self.verbose:
+                print(f"[SOLAR_WASTE] Hour {(self.current_step % 96)/4:.1f}: Solar surplus {net_solar_surplus:.2f}kW but BESS FULL at SoC {bess_soc:.2f}")
+        elif net_solar_surplus <= 0 and 6 <= hour < 18:
+            # Daytime but NO solar surplus - BESS trying to discharge (should be blocked!)
+            if self.verbose:
+                print(f"[NO_SOLAR] Hour {(self.current_step % 96)/4:.1f}: No surplus (Solar={total_solar:.2f}, Load={total_load:.2f}), solar_surplus={net_solar_surplus:.2f}")
         
-        # Strategy 2: Predictive charging from grid during cheap night rates (12am-6am, 21 LKR)
+        # Strategy 1b: Also charge HOME batteries from solar surplus during daytime
+        if 6 <= hour < 18 and net_solar_surplus > 0:
+            # During daytime with solar surplus - force home batteries to charge
+            home_batt_avg_soc = np.mean([self.soc[0], self.soc[1]])
+            if home_batt_avg_soc < 0.75:
+                # Home batteries not full - share solar surplus with them
+                # Reduce BESS charge intensity to allow home batteries to charge from solar
+                total_home_batt_soc = self.soc[0] + self.soc[1]
+                home_charge_share = min(0.5, net_solar_surplus / 10.0)  # Home batteries get up to 50% of surplus (capped)
+                
+                for home_batt_idx, node_idx in enumerate(self.home_batt_indices):
+                    if self.soc[home_batt_idx] < 0.75:
+                        # Force home battery to charge from solar
+                        home_charge_intensity = min(0.6, home_charge_share / self.home_batt_power)
+                        action_modified[home_batt_idx] = -home_charge_intensity
+                        if self.verbose:
+                            print(f"[HOME_SOLAR] Hour {(self.current_step % 96)/4:.1f}: Forcing Home Battery {home_batt_idx} to charge from solar at {home_charge_intensity:.2f} intensity")
+        
+        # Strategy 2: Predictive charging from grid during cheap off-peak rates (12pm-6am, 21 LKR)
         # Calculate if today's solar surplus will be sufficient to fully charge BESS
         # NOTE: Charging blocked between 11pm-12am
         elif hour < 6:
-            # Look ahead to predict today's solar surplus
+            # Look ahead to predict today's daytime solar surplus
             steps_remaining = self.max_steps - self.current_step
-            steps_until_evening = min(steps_remaining, int((18 - hour) * 4))  # Until 6pm
+            steps_until_peak = min(steps_remaining, int((18 - hour) * 4))  # Until peak (6pm)
             
-            if steps_until_evening > 4:  # Need at least 1 hour of data to predict
+            if steps_until_peak > 4:  # Need at least 1 hour of data to predict
                 # Get future solar and load data
-                future_solar = self.solar_episode[self.current_step:self.current_step + steps_until_evening]
-                future_load = self.load_episode[self.current_step:self.current_step + steps_until_evening]
+                future_solar = self.solar_episode[self.current_step:self.current_step + steps_until_peak]
+                future_load = self.load_episode[self.current_step:self.current_step + steps_until_peak]
                 
-                # Calculate total expected solar surplus throughout the day
+                # Calculate total expected solar surplus during daytime
                 future_solar_total = np.sum(future_solar)
                 future_load_total = np.sum(future_load)
-                expected_daily_surplus = future_solar_total - future_load_total
+                expected_daytime_surplus = future_solar_total - future_load_total
                 
-                if expected_daily_surplus > 0:
+                if expected_daytime_surplus > 0:
                     # Convert surplus energy to how much it can charge BESS
                     # Each 15-min step with surplus can charge: surplus_power * 0.25 hours * efficiency
                     # Simplified: assume average surplus is spread across daytime hours
-                    expected_surplus_energy = expected_daily_surplus * 0.25 * 0.95  # kWh with efficiency
+                    expected_surplus_energy = expected_daytime_surplus * 0.25 * 0.95  # kWh with efficiency
                     
-                    # Calculate BESS charging need (from current SoC to 80%)
+                    # Calculate BESS charging need (from current SoC 0.2 to target 0.8)
                     target_soc = 0.8
+                    min_soc = 0.2  # Realistic minimum starting SoC
                     current_energy = bess_soc * self.bess_cap  # Current energy in kWh
                     target_energy = target_soc * self.bess_cap  # Target energy in kWh
                     energy_needed = max(0, target_energy - current_energy)  # How much energy needed
                     
-                    # Calculate deficit that solar can't provide
-                    energy_deficit = max(0, energy_needed - expected_surplus_energy)
-                    
-                    if energy_deficit > 5.0:  # More than 5 kWh deficit
-                        # Solar won't be enough - charge from grid at night
-                        # Calculate remaining night hours for charging (11pm-6am = up to 28 steps)
+                    # KEY LOGIC: Only charge during off-peak if daytime solar is INSUFFICIENT
+                    # If daytime solar surplus >= energy needed, DON'T charge from grid during off-peak
+                    if expected_surplus_energy >= energy_needed:
+                        # Daytime solar is ENOUGH to charge battery - don't consume grid power during off-peak
+                        action_modified[bess_action_idx] = 0.0  # NO charging from grid
+                    else:
+                        # Daytime solar is INSUFFICIENT - charge from grid during off-peak to bridge deficit
+                        energy_deficit = energy_needed - expected_surplus_energy
+                        
+                        # Calculate remaining off-peak hours for charging (11pm-6am)
                         if hour >= 23:
                             # From 11pm to midnight + midnight to 6am
-                            steps_until_6am = int((24 - hour) * 4 + 6 * 4)
+                            steps_until_daytime = int((24 - hour) * 4 + 6 * 4)
                         else:
                             # Already past midnight, just count to 6am
-                            steps_until_6am = int((6 - hour) * 4)
+                            steps_until_daytime = int((6 - hour) * 4)
                         
-                        if steps_until_6am > 0:
-                            # Spread deficit charging across remaining night hours
-                            power_per_step = energy_deficit / (steps_until_6am * 0.25)
+                        if steps_until_daytime > 0:
+                            # Spread deficit charging across remaining off-peak hours
+                            power_per_step = energy_deficit / (steps_until_daytime * 0.25)
                             charge_intensity = min(1.0, power_per_step / self.bess_power)
                         else:
                             charge_intensity = 0.5
                         action_modified[bess_action_idx] = -charge_intensity
-                    elif bess_soc < 0.3:
-                        # Solar will be enough, but SoC is critically low - small safety charge
-                        action_modified[bess_action_idx] = -0.3
                 else:
-                    # No solar surplus expected - charge aggressively at night
-                    if bess_soc < 0.3:
-                        action_modified[bess_action_idx] = -1.0  # Full charge
+                    # No daytime solar surplus expected - charge from grid during off-peak
+                    # For solar unavailable days, MUST charge BESS fully since no daytime solar backup
+                    if bess_soc < 0.7:
+                        # Calculate how much charge is needed (target 0.75 for peak discharge)
+                        energy_deficit = (0.75 - bess_soc) * self.bess_cap  # kWh needed
+                        
+                        # Calculate remaining off-peak hours for charging (11pm-6am = 7 hours max)
+                        if hour >= 23:
+                            steps_until_daytime = int((24 - hour) * 4 + 6 * 4)
+                        else:
+                            steps_until_daytime = int((6 - hour) * 4)
+                        
+                        if steps_until_daytime > 0:
+                            # Spread charging across remaining off-peak hours
+                            power_per_step = energy_deficit / (steps_until_daytime * 0.25)
+                            charge_intensity = min(1.0, power_per_step / self.bess_power)
+                            action_modified[bess_action_idx] = -charge_intensity
+                        else:
+                            action_modified[bess_action_idx] = -0.8  # Strong charge if close to daytime
                     else:
-                        action_modified[bess_action_idx] = -0.7  # High charge
+                        action_modified[bess_action_idx] = 0.0  # Don't charge if already sufficient
             else:
                 # Insufficient lookahead data - fallback to SoC-based charging
                 if bess_soc < 0.4:
@@ -345,22 +425,55 @@ class UrbanVPPEnv(gym.Env):
                 desired_power = 0.0  # Prevent charging when battery full
 
             # --- CONSTRAINT 2: BESS CHARGING STRATEGY ---
-            # BESS prefers solar but can use cheap night grid power (12am-6am)
-            # to ensure sufficient charge for evening peak
-            # NOTE: Charging blocked between 11pm-12am (hour 23-24)
+            # BESS prefers solar but can use cheap off-peak grid power (12am-6am, 21 LKR)
+            # to ensure sufficient charge for peak hour discharge
             if is_bess and desired_power < 0:  # BESS trying to charge
-                # Allow charging if: (1) solar surplus available, OR (2) cheap night hours (12am-6am)
-                if net_solar_surplus <= 0 and (6 <= hour or hour >= 23):
-                    desired_power = 0.0  # Block grid charging outside night hours and during 11pm-12am
+                # Always block charging during 11pm-12am transition
+                if 23 <= hour:
+                    desired_power = 0.0
+                # PRIORITY: If there's solar surplus available, MUST use it, NOT grid
+                # Block ALL grid charging during daytime (6am-6pm) when solar surplus exists
+                elif 6 <= hour < 18 and net_solar_surplus > 0:
+                    # Solar surplus during daytime - charge from solar ONLY, not grid
+                    # Keep charging if BESS not full, set intensity based on surplus
+                    if self.soc[i] < 0.8:
+                        charge_intensity = min(1.0, net_solar_surplus / self.bess_power)
+                        desired_power = -charge_intensity * p_max  # Override to solar charging
+                    else:
+                        desired_power = 0.0  # BESS full, no charging
+                # Block grid charging outside off-peak if solar is insufficient
+                elif net_solar_surplus <= 0 and hour >= 6:
+                    desired_power = 0.0  # Only allow off-peak (0am-6am) when no solar
+                    
+            # CRITICAL: Prevent BESS DISCHARGE when there's solar surplus during daytime
+            # Stay charged for peak hours instead of wasting solar
+            if is_bess and desired_power > 0 and 6 <= hour < 18:  # BESS trying to discharge during daytime
+                if net_solar_surplus > 0:
+                    # Solar surplus available - BLOCK discharge, save battery for peak hours
+                    desired_power = 0.0
+                    if self.verbose:
+                        print(f"[BLOCK_DISCHARGE] Hour {(self.current_step % 96)/4:.1f}: Blocked BESS discharge during daytime with solar surplus {net_solar_surplus:.2f}kW")
             
             # --- CONSTRAINT 3: Home Battery Daytime Solar Charging ---
-            # Home batteries prefer solar during daytime but can use grid at night
+            # Home batteries prefer solar during daytime but MUST use it if available
             # During daytime hours, ONLY allow charging if there's excess solar
-            if not is_bess and 6 <= hour < 18 and desired_power < 0:
-                if net_solar_surplus <= 0:  # No solar surplus available
+            if not is_bess and 6 <= hour < 18 and desired_power < 0:  # Home batt trying to charge
+                if net_solar_surplus > 0:
+                    # Force charging from solar surplus only - do not accept grid power
+                    charge_intensity = min(1.0, net_solar_surplus / self.home_batt_power)
+                    desired_power = -charge_intensity * p_max  # Lock to solar charging
+                elif net_solar_surplus <= 0:
+                    # No solar surplus available - block daytime grid charging
                     desired_power = 0.0  # Block daytime grid charging for home batteries
             
-            # --- CONSTRAINT 4: Block all battery charging between 11pm-12am ---
+            # --- CONSTRAINT 4: Home Battery Discharge Strategy ---
+            # Home batteries should ONLY discharge during peak hours (6pm-11pm, 67 LKR)
+            # Save them for when grid prices are highest, avoid daytime/off-peak discharge
+            if not is_bess and desired_power > 0:  # Home battery trying to discharge
+                if not (18 <= hour < 23):  # NOT during peak hours (6pm-11pm)
+                    desired_power = 0.0  # Block discharge outside peak - save for expensive hours
+            
+            # --- CONSTRAINT 5: Block all battery charging between 11pm-12am ---
             if 23 <= hour < 24 and desired_power < 0:
                 desired_power = 0.0  # No charging allowed between 11pm-12am
             
@@ -404,24 +517,24 @@ class UrbanVPPEnv(gym.Env):
         self.net_injection = full_solar_profile + self.node_battery_power_kw - full_load_profile
 
         # Prepare inputs for OpenDSS
-        loads_kw = full_load_profile[:10].tolist()
+        loads_kw = full_load_profile[:21].tolist()
         pv_kw = {idx: full_solar_profile[idx] for idx in self.solar_indices}
         
-        batt0 = self.node_battery_power_kw[0]
-        batt2 = self.node_battery_power_kw[2]
-        bess = self.node_battery_power_kw[10]
+        batt_home3 = self.node_battery_power_kw[3]
+        batt_home5 = self.node_battery_power_kw[5]
+        bess = self.node_battery_power_kw[21]
         
         # Run OpenDSS Step
         step_res = self.dss_runner.step(
             loads_kw=loads_kw,
             pv_kw=pv_kw,
-            batt_home0_kw=batt0,
-            batt_home2_kw=batt2,
+            batt_home3_kw=batt_home3,
+            batt_home5_kw=batt_home5,
             bess_kw=bess,
             auto_compile=False
         )
         
-        # Voltages are now in fixed order: N0, N1, ..., N9, NBESS (indices 0-10)
+        # Voltages are now in fixed order: N0, N1, ..., N20, NBESS (indices 0-21)
         # Store min voltage for observations (RL agent sees this)
         self.voltages = np.array(step_res.vmin_pu_by_bus, dtype=np.float32)
         
@@ -440,9 +553,9 @@ class UrbanVPPEnv(gym.Env):
         
         if 6 <= hour < 18:         # Daytime / solar hours (6am-6pm)
             buy_price, sell_price = 35, 19  # LKR per kWh per 15-min
-        elif 18 <= hour < 23:      # Evening peak (6pm-11pm)
+        elif 18 <= hour < 23:      # Peak  (6pm-11pm)
             buy_price, sell_price = 67, 45  # LKR per kWh per 15-min
-        else:                      # Night (11pm-6am)
+        else:                      # Off-peak  (11pm-6am)
             buy_price, sell_price = 21, 0   # LKR per kWh per 15-min
 
         # Grid economics based on net injection (solar + battery - load)
@@ -494,34 +607,40 @@ class UrbanVPPEnv(gym.Env):
             
             if net_solar_surplus > 0:
                 # Solar surplus available: STRONG reward for charging from excess solar
-                daytime_solar_bonus += -8.0 * total_charge_power  # Strong solar charging
+                # Coefficient 26 represents the arbitrage profit (45 LKR peak - 19 LKR daytime export)
+                daytime_solar_bonus += 26.0 * (-total_charge_power)  # Reward proportional to arbitrage
                 
-                # Extra BESS bonus for absorbing community solar
+                # Extra incentive for BESS to absorb community solar (priority target)
                 bess_charge_power = np.minimum(0, self.node_battery_power_kw[self.bess_index])
                 surplus_factor = min(1.0, net_solar_surplus / 20.0)
-                daytime_solar_bonus += -10.0 * bess_charge_power * (1.0 + surplus_factor)
+                daytime_solar_bonus += 26.0 * (-bess_charge_power) * (1.0 + surplus_factor)
+            else:
+                # NO solar surplus - penalize BESS discharge during daytime to save for peak hours
+                bess_discharge_power = np.maximum(0, self.node_battery_power_kw[self.bess_index])
+                daytime_solar_bonus -= 26.0 * bess_discharge_power  # Penalty for losing arbitrage opportunity
             
             
         
-        # ----- SECTION 2: EVENING PEAK (6pm-11pm) -----
-        # Strategy: Discharge at high prices to maximize revenue
-        evening_peak_bonus = 0.0
-        if 18 <= hour < 23:  # Evening peak hours
+        # ----- SECTION 2: PEAK (6pm-11pm) -----
+        # Strategy: Discharge at HIGH prices to maximize revenue at peak demand times
+        # Peak discharge value = 45 LKR sell price (much higher than daytime 19 LKR)
+        peak_bonus = 0.0
+        if 18 <= hour < 23:  # Evening peak hours (6pm-11pm)
             if np.mean(self.soc) > 0.3:  # Only discharge if battery has energy
                 total_discharge_power = np.sum(np.maximum(0, self.node_battery_power_kw))
-                # STRONG incentive to discharge at peak prices (67 LKR)
-                evening_peak_bonus = 10.0 * total_discharge_power
+                # Reward peak discharge with coefficient 45 (reflects peak price)
+                peak_bonus = 45.0 * total_discharge_power
         
-        # ----- SECTION 3: NIGHT (12am-6am) -----
+        # ----- SECTION 3: OFF-PEAK (11pm-6am) -----
         # Strategy: HOME batteries and BESS can charge at cheap rates (21 LKR)
-        # BESS charges at night to supplement insufficient solar generation
+        # BESS charges during off-peak to supplement insufficient daytime solar generation
         # NOTE: Charging blocked between 11pm-12am
-        night_charge_bonus = 0.0
-        if hour < 6:  # Night hours (12am-6am only)
+        offpeak_bonus = 0.0
+        if hour < 6:  # Off-peak hours (12am-6am only)
             # HOME BATTERY CHARGING
             home_batt_soc = [self.soc[0], self.soc[1]]  # Home batteries only
             if np.mean(home_batt_soc) < 0.7:  # Room to charge
-                home_charge_power = self.node_battery_power_kw[0] + self.node_battery_power_kw[2]
+                home_charge_power = self.node_battery_power_kw[3] + self.node_battery_power_kw[5]
                 home_charge_power = min(0, home_charge_power)  # Negative when charging
                 
                 # Predictive charging: Check if tomorrow's solar will be sufficient
@@ -544,61 +663,61 @@ class UrbanVPPEnv(gym.Env):
                         home_capacity = 2 * self.home_batt_cap
                         energy_needed = home_capacity * (0.75 - np.mean(home_batt_soc))
                         
-                        # If solar can provide 70%+ of needed energy, don't use grid
-                        if expected_surplus > energy_needed * 0.7:
+                        # If solar can provide 90%+ of needed energy, don't use grid
+                        if expected_surplus > energy_needed * 0.9:
                             solar_will_be_sufficient = True
                 
                 # Decision based on solar forecast (only for home batteries)
                 if solar_will_be_sufficient:
                     # PENALTY: Don't charge from grid, save capacity for solar
-                    night_charge_bonus = 8.0 * home_charge_power
+                    offpeak_bonus = 8.0 * home_charge_power
                 else:
-                    # REWARD: Charge at cheap night rates (solar won't be enough)
-                    night_charge_bonus = -15.0 * home_charge_power
+                    # REWARD: Charge at cheap off-peak rates (solar won't be enough)
+                    offpeak_bonus = -15.0 * home_charge_power
             
-            # BESS NIGHT CHARGING - Predictive Strategy
-            # Reward BESS for intelligently pre-charging based on solar forecast
+            # BESS OFF-PEAK CHARGING - Predictive Strategy
+            # Reward BESS for intelligently pre-charging based on daytime solar forecast
             bess_soc = self.soc[2]  # BESS SoC
-            bess_charge_power = self.node_battery_power_kw[self.bess_index]  # Node 10
+            bess_charge_power = self.node_battery_power_kw[self.bess_index]  # Node 21
             
             if bess_charge_power < 0:  # BESS is charging
-                # Look ahead to assess if this night charging is justified
+                # Look ahead to assess if this off-peak charging is justified
                 steps_remaining = self.max_steps - self.current_step
-                steps_until_evening = min(steps_remaining, int((18 - hour) * 4))
+                steps_until_peak = min(steps_remaining, int((18 - hour) * 4))
                 
-                if steps_until_evening > 4:
-                    future_solar = self.solar_episode[self.current_step:self.current_step + steps_until_evening]
-                    future_load = self.load_episode[self.current_step:self.current_step + steps_until_evening]
-                    expected_surplus = np.sum(future_solar) - np.sum(future_load)
+                if steps_until_peak > 4:
+                    future_solar = self.solar_episode[self.current_step:self.current_step + steps_until_peak]
+                    future_load = self.load_episode[self.current_step:self.current_step + steps_until_peak]
+                    expected_daytime_surplus = np.sum(future_solar) - np.sum(future_load)
                     
-                    # Calculate if solar will be sufficient
-                    expected_surplus_energy = expected_surplus * 0.25 * 0.95
+                    # Calculate if daytime solar will be sufficient
+                    expected_surplus_energy = expected_daytime_surplus * 0.25 * 0.95
                     energy_needed = (0.75 - bess_soc) * self.bess_cap
                     
                     if expected_surplus_energy < energy_needed:
-                        # Solar insufficient - STRONG reward for smart night charging
-                        night_charge_bonus += -18.0 * bess_charge_power
+                        # Daytime solar insufficient - STRONG reward for smart off-peak charging
+                        offpeak_bonus += -18.0 * bess_charge_power
                     else:
-                        # Solar will be sufficient - moderate reward (still economical at 13c)
-                        night_charge_bonus += -8.0 * bess_charge_power
+                        # Daytime solar will be sufficient - moderate reward (still economical at 21 LKR)
+                        offpeak_bonus += -8.0 * bess_charge_power
                 else:
                     # Not enough lookahead data - reward based on SoC state
                     if bess_soc < 0.4:
-                        night_charge_bonus += -15.0 * bess_charge_power
+                        offpeak_bonus += -15.0 * bess_charge_power
                     else:
-                        night_charge_bonus += -10.0 * bess_charge_power
+                        offpeak_bonus += -10.0 * bess_charge_power
 
-        # B. Voltage Violation Penalty (0.9 to 1.1 p.u. limits)
+        # B. Voltage Violation Penalty (0.94 to 1.06 p.u. limits)
         # Monitor all nodes for grid safety compliance (3-phase aware)
-        critical_nodes = list(range(10)) + [self.bess_index]
+        critical_nodes = list(range(21)) + [self.bess_index]
 
-        # Check undervoltage: min voltage per bus should be >= 0.9
+        # Check undervoltage: min voltage per bus should be >= 0.94
         min_voltages = self.voltages_min[critical_nodes]
-        under_voltage = np.maximum(0, 0.9 - min_voltages)
+        under_voltage = np.maximum(0, 0.94 - min_voltages)
         
-        # Check overvoltage: max voltage per bus should be <= 1.1
+        # Check overvoltage: max voltage per bus should be <= 1.06
         max_voltages = self.voltages_max[critical_nodes]
-        over_voltage = np.maximum(0, max_voltages - 1.1)
+        over_voltage = np.maximum(0, max_voltages - 1.06)
         
         total_violation = np.sum(over_voltage + under_voltage)
         
@@ -606,7 +725,7 @@ class UrbanVPPEnv(gym.Env):
         # Example: 0.01 p.u. deviation → -1 penalty
         # Example: 0.01 p.u. deviation → -1 penalty
         # voltage_penalty = -100.0 * total_violation
-        voltage_penalty = -50.0 * (total_violation ** 2)
+        voltage_penalty = -100.0 * (total_violation ** 2)
 
         # C. Battery Health & Smoothness
         # Penalize rapid power changes to reduce battery stress
@@ -634,9 +753,9 @@ class UrbanVPPEnv(gym.Env):
         reward = (revenue 
                   - cost 
                   + voltage_penalty 
-                  + daytime_solar_bonus      # Daytime solar charging (6am-6pm)
-                  + evening_peak_bonus       # Evening peak discharge (6pm-11pm)
-                  + night_charge_bonus       # Night cheap charging (11pm-6am)
+                  + daytime_solar_bonus      # Daytime solar charging (6am-6pm) + morning peak shaving
+                  + peak_bonus               # Peak discharge (6pm-11pm)
+                  + offpeak_bonus            # Off-peak charging (11pm-6am)
                   + cycling_cost
                   + soc_health_penalty)
         
@@ -672,8 +791,8 @@ class UrbanVPPEnv(gym.Env):
             "bess_discharge_revenue": bess_discharge_revenue,
             "bess_charge_cost": bess_charge_cost,
             # Battery states
-            "soc_home0": self.soc[0],
-            "soc_home2": self.soc[1],
+            "soc_home3": self.soc[0],
+            "soc_home5": self.soc[1],
             "soc_bess": self.soc[2],
             "bess_power": self.node_battery_power_kw[self.bess_index],
             "voltage_penalty": voltage_penalty
@@ -682,14 +801,14 @@ class UrbanVPPEnv(gym.Env):
         return obs, float(reward), terminated, truncated, info
 
     def _get_obs(self):
-        """Constructs the exact 29-value input vector for the RL agent.
+        """Constructs the exact 51-value input vector for the RL agent.
         
         Observation Structure:
         - [0]:     Common solar forecast (kW)
-        - [1-10]:  Load forecasts for Houses 0-9 (kW)
-        - [11-21]: Voltages at ALL nodes [0,1,2,3,4,5,6,7,8,9,BESS] (p.u.)
-        - [22-24]: Battery SoCs [Home0, Home2, BESS] (0-1)
-        - [25-28]: Time features [sin(time), cos(time), sin(day), cos(day)]
+        - [1-21]:  Load forecasts for Houses 0-20 (kW)
+        - [22-43]: Voltages at ALL nodes [0,1,2,...,20,BESS] (p.u.)
+        - [44-46]: Battery SoCs [Home3, Home5, BESS] (0-1)
+        - [47-50]: Time features [sin(time), cos(time), sin(day), cos(day)]
         """
         
         # 1. Common Solar Forecast (1 Value)
@@ -700,13 +819,13 @@ class UrbanVPPEnv(gym.Env):
         else:
             # Safety: Return zeros if episode has ended
             common_solar = np.array([0.0])
-            load_step = np.zeros(10)
+            load_step = np.zeros(21)
         
-        # 2. Load Forecasts (10 Values)
+        # 2. Load Forecasts (21 Values)
         # Already extracted as load_step above
         
-        # 3. All Node Voltages (11 Values) - CRITICAL INPUT
-        # Complete grid visibility: Houses 0-9 + BESS node
+        # 3. All Node Voltages (22 Values) - CRITICAL INPUT
+        # Complete grid visibility: Houses 0-20 + BESS node
         all_voltages = self.voltages
 
         # 4. Battery States of Charge (3 Values)
@@ -722,11 +841,11 @@ class UrbanVPPEnv(gym.Env):
             np.sin(day_angle),  np.cos(day_angle)
         ])
 
-        # 6. Pack State Vector (Total: 29 values)
+        # 6. Pack State Vector (Total: 51 values)
         self.state = np.concatenate([
             common_solar,    # 1
-            load_step,       # 10
-            all_voltages,    # 11 (Complete grid visibility!)
+            load_step,       # 21
+            all_voltages,    # 22 (Complete grid visibility!)
             self.soc,        # 3
             date_time_feats  # 4
         ]).astype(np.float32)

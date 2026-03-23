@@ -43,7 +43,7 @@ class UrbanVPPEnv(gym.Env):
             raise ValueError(f"Solar indices must be in range [0, 20]. Got: {self.solar_indices}")
         
         # Which nodes have Batteries?
-        self.home_batt_indices = [3]  # Home Batteries at nodes 3 & 5
+        self.home_batt_indices = [3, 5]  # Home Batteries at nodes 3 & 5
         self.bess_index = 21  # BESS at node 21 (end of feeder)
         
         # Map actions to physical nodes: Action[0]->Node3, Action[1]->Node5, Action[2]->Node21(BESS)

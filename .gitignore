@@ -220,3 +220,4 @@ Folder content.txt
 eval_logs/evaluations.npz
 *.npz
 *.npz
+/RL_agent/old_test_scripts

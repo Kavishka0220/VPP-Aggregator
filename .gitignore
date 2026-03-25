@@ -200,8 +200,8 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 
 # ===== VPP-AGGREGATOR SPECIFIC FILES =====
-solar_load.png
-solar_voltages.png
+solar_load.png/
+solar_voltages.png/
 thesis_result_plot.png
 total_load_solar.png
 

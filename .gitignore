@@ -220,6 +220,7 @@ training_logs/
 # Generated output files
 results_plots/
 data_output/
+no_battery/
 
 # Large data files (keep only documentation examples)
 data/*.csv

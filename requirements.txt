@@ -1,21 +1,31 @@
-# VPP Aggregator - RL Agent Requirements
+# VPP-Aggregator: Virtual Power Plant Optimization with Reinforcement Learning
 # Python 3.10+ recommended
+# Install with: pip install -r requirements.txt
 
-# Core RL Libraries
-gymnasium>=0.29.0
-stable-baselines3>=2.2.0
-tensorboard>=2.15.0
+# ===== CORE REINFORCEMENT LEARNING =====
+gymnasium>=0.29.0              # RL environment framework
+stable-baselines3>=2.2.0       # RL algorithms (PPO, DQN, etc.)
+tensorboard>=2.15.0            # Training visualization
 
-# Numerical & Data Processing
-numpy>=1.24.0
-pandas>=2.0.0
+# ===== NUMERICAL & DATA PROCESSING =====
+numpy>=1.24.0                  # Numerical computing
+pandas>=2.0.0                  # Data manipulation & analysis
+scipy>=1.10.0                  # Scientific computing
 
-# Optional but recommended
-matplotlib>=3.7.0
-seaborn>=0.12.0
+# ===== VISUALIZATION & PLOTTING =====
+matplotlib>=3.7.0              # Plotting library
+seaborn>=0.12.0                # Statistical visualizations
 
-# For plotting and analysis
-scipy>=1.10.0
+# ===== POWER SYSTEM SIMULATION =====
+# OpenDSS Python interface (for power grid simulation)
+# Note: Install separately if needed: pip install opendssdirect.py
 
-# Note: If you encounter issues with gymnasium, you may need:
-# pip install gymnasium[all]
+# ===== OPTIONAL UTILITIES =====
+# pytest>=7.0.0                # Unit testing
+# python-dotenv>=0.20.0        # Environment variable management
+
+# ===== TROUBLESHOOTING NOTES =====
+# If gymnasium installation fails, use:
+#   pip install gymnasium[all]
+# For OpenDSS integration:
+#   pip install opendssdirect.py

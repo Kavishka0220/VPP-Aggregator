@@ -198,6 +198,41 @@ cython_debug/
 #  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
 #  refer to https://docs.cursor.com/context/ignore-files
+
+# ===== VPP-AGGREGATOR SPECIFIC FILES =====
+solar_load.png
+solar_voltages.png
+thesis_result_plot.png
+total_load_solar.png
+
+# ===== VPP-AGGREGATOR PROJECT SPECIFIC =====
+# Machine learning models & checkpoints
+checkpoints/
+*.zip
+*.pkl
+*.h5
+
+# Training & evaluation logs
+tensorboard_logs/
+eval_logs/
+training_logs/
+
+# Generated output files
+results_plots/
+data_output/
+
+# Large data files (keep only documentation examples)
+data/*.csv
+!data/README.md
+
+# OpenDSS outputs
+openDSS/__pycache__/
+*.dbl
+*.DSV
+
+# OS files
+.DS_Store
+Thumbs.db
 .cursorignore
 .cursorindexingignore
 

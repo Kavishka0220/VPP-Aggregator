@@ -227,6 +227,7 @@ data/*.csv
 
 # OpenDSS outputs
 openDSS/__pycache__/
+openDSS/main.dss
 *.dbl
 *.DSV
 

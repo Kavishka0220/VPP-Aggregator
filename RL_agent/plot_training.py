@@ -74,7 +74,7 @@ def find_latest_run(base_dir):
 
 def plot_training_rewards(data, output_dir='./results_plots'):
     """
-    Plot training metrics from parsed TensorBoard data.
+    Plot training reward curve with statistics.
     
     Args:
         data: Dictionary from parse_tensorboard_logs()
@@ -82,84 +82,60 @@ def plot_training_rewards(data, output_dir='./results_plots'):
     """
     os.makedirs(output_dir, exist_ok=True)
     
-    # Determine which metrics are available
-    has_reward = 'rollout/ep_rew_mean' in data
-    has_length = 'rollout/ep_len_mean' in data
-    has_loss = 'train/loss' in data
-    
-    # Create figure with subplots based on available data
-    n_plots = sum([has_reward, has_length, has_loss])
-    if n_plots == 0:
-        print("[ERROR] No metrics to plot!")
+    if 'rollout/ep_rew_mean' not in data:
+        print("[ERROR] No reward data to plot!")
         return
     
-    fig, axes = plt.subplots(n_plots, 1, figsize=(14, 4*n_plots), sharex=True)
-    if n_plots == 1:
-        axes = [axes]
+    # Extract reward data
+    reward_data = data['rollout/ep_rew_mean']
+    steps = np.array(reward_data['steps'])
+    rewards = np.array(reward_data['values'])
     
-    plot_idx = 0
+    # Calculate statistics
+    max_reward = np.max(rewards)
+    min_reward = np.min(rewards)
+    mean_reward = np.mean(rewards)
+    final_reward = rewards[-1]
     
-    # Plot 1: Episode Reward Mean
-    if has_reward:
-        reward_data = data['rollout/ep_rew_mean']
-        steps = np.array(reward_data['steps'])
-        rewards = np.array(reward_data['values'])
-        
-        axes[plot_idx].plot(steps, rewards, color='#2E8B57', linewidth=1.5, alpha=0.8)
-        axes[plot_idx].set_title('Mean Episode Reward During Training', fontsize=12, fontweight='bold')
-        axes[plot_idx].set_ylabel('Mean Reward', fontweight='bold')
-        axes[plot_idx].grid(True, alpha=0.3)
-        
-        # Add trend line
-        if len(steps) > 10:
-            z = np.polyfit(steps, rewards, 3)
-            p = np.poly1d(z)
-            axes[plot_idx].plot(steps, p(steps), "--", color='red', linewidth=2, alpha=0.7, label='Trend')
-            axes[plot_idx].legend()
-        
-        # Add statistics
-        max_reward = np.max(rewards)
-        final_reward = rewards[-1]
-        axes[plot_idx].axhline(y=max_reward, color='green', linestyle=':', linewidth=1, alpha=0.5)
-        axes[plot_idx].text(0.02, 0.98, f'Max: {max_reward:.2f}\nFinal: {final_reward:.2f}', 
-                           transform=axes[plot_idx].transAxes, fontsize=9,
-                           verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-        
-        plot_idx += 1
+    # Create single figure
+    fig, ax = plt.subplots(1, 1, figsize=(14, 7))
     
-    # Plot 2: Episode Length
-    if has_length:
-        length_data = data['rollout/ep_len_mean']
-        steps = np.array(length_data['steps'])
-        lengths = np.array(length_data['values'])
-        
-        axes[plot_idx].plot(steps, lengths, color='#4169E1', linewidth=1.5, alpha=0.8)
-        axes[plot_idx].set_title('Mean Episode Length During Training', fontsize=12, fontweight='bold')
-        axes[plot_idx].set_ylabel('Episode Length (steps)', fontweight='bold')
-        axes[plot_idx].grid(True, alpha=0.3)
-        
-        plot_idx += 1
+    # Plot main reward curve
+    ax.plot(steps, rewards, color='#2E8B57', linewidth=2, alpha=0.8, label='Episode Reward')
     
-    # Plot 3: Training Loss
-    if has_loss:
-        loss_data = data['train/loss']
-        steps = np.array(loss_data['steps'])
-        losses = np.array(loss_data['values'])
-        
-        axes[plot_idx].plot(steps, losses, color='#FF6347', linewidth=1.5, alpha=0.8)
-        axes[plot_idx].set_title('Training Loss', fontsize=12, fontweight='bold')
-        axes[plot_idx].set_ylabel('Loss', fontweight='bold')
-        axes[plot_idx].grid(True, alpha=0.3)
-        
-        plot_idx += 1
+    # Add trend line (smoothed)
+    if len(steps) > 10:
+        z = np.polyfit(steps, rewards, 3)
+        p = np.poly1d(z)
+        ax.plot(steps, p(steps), "--", color='#FF6347', linewidth=2.5, alpha=0.8, label='Smoothed (window=5)')
     
-    # Set x-label on bottom plot
-    axes[-1].set_xlabel('Training Steps (Timesteps)', fontweight='bold')
+    # Add reference lines
+    ax.axhline(y=max_reward, color='green', linestyle=':', linewidth=1.5, alpha=0.6)
+    ax.axhline(y=mean_reward, color='orange', linestyle=':', linewidth=1.5, alpha=0.6)
+    
+    ax.set_title('Training Reward Over Time', fontsize=14, fontweight='bold')
+    ax.set_xlabel('Training Steps (Timesteps)', fontweight='bold', fontsize=11)
+    ax.set_ylabel('Mean Episode Reward', fontweight='bold', fontsize=11)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='lower right', fontsize=10)
+    
+    # Add statistics box
+    stats_text = f'Max: {max_reward:.2f}\nMin: {min_reward:.2f}\nMean: {mean_reward:.2f}\nFinal: {final_reward:.2f}'
+    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=11,
+            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8, pad=0.8),
+            fontweight='bold', family='monospace')
     
     plt.tight_layout()
-    output_file = f"{output_dir}/training_progress.png"
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"\n[OK] Saved training plot to '{output_file}'")
+    
+    # Save as PNG
+    output_file_png = f"{output_dir}/training_reward.png"
+    plt.savefig(output_file_png, dpi=300, bbox_inches='tight')
+    print(f"[OK] Saved training plot to '{output_file_png}'")
+    
+    # Save as PDF
+    output_file_pdf = f"{output_dir}/training_reward.pdf"
+    plt.savefig(output_file_pdf, format='pdf', bbox_inches='tight')
+    print(f"[OK] Saved training plot to '{output_file_pdf}'")
     
     return fig
 
@@ -211,6 +187,10 @@ def plot_multiple_runs(base_dir='./tensorboard_logs', output_dir='./results_plot
     output_file = f"{output_dir}/training_comparison.png"
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"[OK] Saved comparison plot to '{output_file}'")
+    
+    output_file_pdf = f"{output_dir}/training_comparison.pdf"
+    plt.savefig(output_file_pdf, format='pdf', bbox_inches='tight')
+    print(f"[OK] Saved comparison plot to '{output_file_pdf}'")
     
     plt.show()
 

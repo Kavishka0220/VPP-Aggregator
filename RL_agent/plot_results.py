@@ -21,7 +21,7 @@ STATS_PATH = os.path.join(script_dir, "checkpoints", "best_model", "vecnormalize
 OUTPUT_DIR = os.path.join(os.path.dirname(script_dir), "results_plots")  # Where to save plots
 
 steps_to_plot = 96  # One day (15 min intervals)
-SCENARIO_NAME = "cloudy_day" # Set to same as train.py (e.g. "heatwave_day") or None for default
+SCENARIO_NAME = "night_peak" # Set to same as train.py (e.g. "heatwave_day") or None for default
  
 # Node configuration
 SOLAR_NODE_INDICES = [3, 5, 7, 10, 11, 13, 15, 17, 18, 19, 20]
@@ -283,9 +283,12 @@ for ax in axes:
     ax.set_xlim(0, 24)
 
 plt.subplots_adjust(left=0.06, bottom=0.08, right=0.87, top=0.95, hspace=0.25)
-output_file_2 = f"{SCENARIO_FOLDER}/1_power_economics_detailed.png"
+output_file_2 = f"{SCENARIO_FOLDER}/1_power_exchange_detailed.png"
 plt.savefig(output_file_2, dpi=300, bbox_inches='tight')
 print(f"[OK] Saved '{output_file_2}'")
+output_file_2_pdf = f"{SCENARIO_FOLDER}/1_power_exchange_detailed.pdf"
+plt.savefig(output_file_2_pdf, format='pdf', bbox_inches='tight')
+print(f"[OK] Saved '{output_file_2_pdf}'")
 
 # ==========================================
 # ==========================================
@@ -350,6 +353,9 @@ if len(HOME_BATTERY_INDICES_AVAILABLE) > 0:
     output_file_3 = f"{SCENARIO_FOLDER}/1_5_home_batteries.png"
     plt.savefig(output_file_3, dpi=300, bbox_inches='tight')
     print(f"[OK] Saved '{output_file_3}'")
+    output_file_3_pdf = f"{SCENARIO_FOLDER}/1_5_home_batteries.pdf"
+    plt.savefig(output_file_3_pdf, format='pdf', bbox_inches='tight')
+    print(f"[OK] Saved '{output_file_3_pdf}'")
 else:
     print("[INFO] Skipping Figure 3 - No home batteries available")
     output_file_3 = None
@@ -412,6 +418,9 @@ plt.subplots_adjust(left=0.05, bottom=0.08, right=0.85, top=0.94, hspace=0.22)
 output_file_4 = f"{SCENARIO_FOLDER}/2_voltage_profiles.png"
 plt.savefig(output_file_4, dpi=300, bbox_inches='tight')
 print(f"[OK] Saved '{output_file_4}'")
+output_file_4_pdf = f"{SCENARIO_FOLDER}/2_voltage_profiles.pdf"
+plt.savefig(output_file_4_pdf, format='pdf', bbox_inches='tight')
+print(f"[OK] Saved '{output_file_4_pdf}'")
 
 # ==========================================
 # FIGURE 5: Economic Performance & Rewards

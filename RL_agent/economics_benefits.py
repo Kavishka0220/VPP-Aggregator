@@ -108,13 +108,14 @@ def _write_summary_report(report_lines, output_path):
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(report_lines))
 
-def print_economics(model_path="checkpoints/best_model/best_model", num_episodes=1):
+def print_economics(model_path="checkpoints/best_model/best_model", num_episodes=1, scenario_name="night_peak"):
     """
     Test the trained model and print economic benefits breakdown.
     
     Args:
         model_path: Path to trained model (without .zip extension)
         num_episodes: Number of episodes to run
+        scenario_name: Scenario to use for the environment
     """
     
     print("="*80)
@@ -130,13 +131,14 @@ def print_economics(model_path="checkpoints/best_model/best_model", num_episodes
         "=" * 80,
         f"Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"Model path: {model_path}",
+        f"Scenario: {scenario_name}",
         f"Episodes: {num_episodes}",
     ]
     
     # Load environment and model
     try:
         data_path = os.path.join(os.path.dirname(current_dir), "data")
-        env = UrbanVPPEnv(data_path=data_path, scenario_name="weekend_low_load_21_nodes")
+        env = UrbanVPPEnv(data_path=data_path, scenario_name=scenario_name)
         
         # Resolve model path to absolute
         if not os.path.isabs(model_path):
@@ -389,7 +391,9 @@ if __name__ == "__main__":
                        help="Path to trained model (without .zip)")
     parser.add_argument("--episodes", type=int, default=1,
                        help="Number of episodes to run")
+    parser.add_argument("--scenario", type=str, default="night_peak",
+                       help="Scenario name to use")
     
     args = parser.parse_args()
     
-    print_economics(model_path=args.model, num_episodes=args.episodes)
+    print_economics(model_path=args.model, num_episodes=args.episodes, scenario_name=args.scenario)

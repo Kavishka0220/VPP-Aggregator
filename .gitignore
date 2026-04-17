@@ -258,3 +258,4 @@ eval_logs/evaluations.npz
 *.npz
 *.npz
 /RL_agent/old_test_scripts
+results_plots/night_peak/3_rewards.png

@@ -28,6 +28,7 @@ class UrbanVPPEnv(gym.Env):
         # Testing configuration
         self.verbose = verbose
         self.default_start_index = start_index
+        self.scenario_name = scenario_name
 
         # Initialize OpenDSS Runner
         dss_file = os.path.join(parent_dir, "openDSS", "feeder_houses.dss")

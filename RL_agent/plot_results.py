@@ -11,7 +11,7 @@ from pathlib import Path
 # Set plotting style
 sns.set_style("whitegrid")
 plt.rcParams['figure.dpi'] = 150
-plt.rcParams['font.size'] = 6
+plt.rcParams['font.size'] = 8
 
 # --- CONFIGURATION ---
 # Get script directory for absolute paths
@@ -189,7 +189,7 @@ print("[INFO] Generating Figure 1 (Simple Thesis Plot)...")
 fig1, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
 
 # Plot 1: Power Balance
-ax1.set_title("Feeder Power Balance", fontsize=10, fontweight='bold')
+ax1.set_title("Feeder Power Balance", fontsize=12, fontweight='bold')
 ax1.plot(time_axis, history["solar"], color='orange', label='Solar Gen', linewidth=1.5, alpha=0.7)
 ax1.plot(time_axis, history["load"], color='blue', label='Load Demand', linewidth=1.5, alpha=0.7)
 ax1.bar(time_axis, history["bess_power"], color='green', width=0.2, label='BESS Power', alpha=0.7)
@@ -201,12 +201,12 @@ if HOME_BATTERY_INDICES[0] in real_env.storage_map:
 if HOME_BATTERY_INDICES[1] in real_env.storage_map:
     ax1.plot(time_axis, history["hb2_power"], color='magenta', linestyle=':', linewidth=1.2, label='Home Battery 2')
 
-ax1.set_ylabel("Power (kW)", fontsize=8, fontweight='bold')
-ax1.legend(loc="upper left", bbox_to_anchor=(1.01, 1), fontsize=6)
+ax1.set_ylabel("Power (kW)", fontsize=10, fontweight='bold')
+ax1.legend(loc="upper left", bbox_to_anchor=(1.01, 1), fontsize=8)
 ax1.grid(True, alpha=0.3)
 
 # Plot 2: SoC
-ax2.set_title("Battery State of Charge", fontsize=10, fontweight='bold')
+ax2.set_title("Battery State of Charge", fontsize=12, fontweight='bold')
 ax2.plot(time_axis, history["soc_bess"], color='green', linewidth=1.8, label='Central BESS')
 
 # Only plot home batteries if they exist
@@ -215,10 +215,10 @@ if HOME_BATTERY_INDICES[0] in real_env.storage_map:
 if HOME_BATTERY_INDICES[1] in real_env.storage_map:
     ax2.plot(time_axis, history["soc_hb2"], color='magenta', linestyle=':', linewidth=1.5, label='Home Battery 2')
 
-ax2.set_ylabel("SoC (0-1)", fontsize=8, fontweight='bold')
+ax2.set_ylabel("SoC (0-1)", fontsize=10, fontweight='bold')
 ax2.set_ylim(0, 1.05)
-ax2.set_xlabel("Time (Hours)", fontsize=8, fontweight='bold')
-ax2.legend(loc="upper left", bbox_to_anchor=(1.01, 1), fontsize=6)
+ax2.set_xlabel("Time (Hours)", fontsize=10, fontweight='bold')
+ax2.legend(loc="upper left", bbox_to_anchor=(1.01, 1), fontsize=8)
 ax2.grid(True, alpha=0.3)
 ax2.set_xticks(np.arange(0, 25, 4))
 
@@ -234,17 +234,17 @@ print("[INFO] Generating Figure 2 (Detailed Power & Economics)...")
 fig2, axes = plt.subplots(3, 1, figsize=(16, 10), sharex=True)
 
 # Subplot 1: Power Balance
-axes[0].set_title("Power Generation and Consumption", fontsize=9, fontweight='bold')
+axes[0].set_title("Power Generation and Consumption", fontsize=11, fontweight='bold')
 axes[0].plot(time_axis, history["solar"], color='#FF8C00', label='Solar Generation', linewidth=1.5, alpha=0.8)
 axes[0].plot(time_axis, history["load"], color='#1E90FF', label='Load Demand', linewidth=1.5, alpha=0.8)
 axes[0].fill_between(time_axis, 0, history["solar"], color='#FF8C00', alpha=0.2)
 axes[0].fill_between(time_axis, 0, history["load"], color='#1E90FF', alpha=0.2)
 axes[0].set_ylabel("Power (kW)", fontweight='bold')
-axes[0].legend(loc="upper left", bbox_to_anchor=(1.01, 1), framealpha=0.9, fontsize=6)
+axes[0].legend(loc="upper left", bbox_to_anchor=(1.01, 1), framealpha=0.9, fontsize=8)
 axes[0].grid(True, alpha=0.3)
 
 # Subplot 2: BESS Charge/Discharge Curve + SOC (Dual Axis)
-axes[1].set_title("BESS Charge/Discharge Power & State of Charge(SoC)", fontsize=9, fontweight='bold')
+axes[1].set_title("BESS Charge/Discharge Power & State of Charge(SoC)", fontsize=11, fontweight='bold')
 # Left y-axis: Power
 axes[1].plot(time_axis, history["bess_power"], color='#32CD32', linewidth=1.8, label='BESS Power', alpha=0.9)
 axes[1].fill_between(time_axis, 0, history["bess_power"], where=np.array(history["bess_power"])>0, color='#32CD32', alpha=0.25, label='Discharge')
@@ -264,17 +264,17 @@ ax1_right.set_ylim(0, 1.05)
 # Combined legend
 lines1, labels1 = axes[1].get_legend_handles_labels()
 lines2, labels2 = ax1_right.get_legend_handles_labels()
-axes[1].legend(lines1 + lines2, labels1 + labels2, loc="upper left", bbox_to_anchor=(1.02, 1), framealpha=0.9, fontsize=6)
+axes[1].legend(lines1 + lines2, labels1 + labels2, loc="upper left", bbox_to_anchor=(1.03, 1), framealpha=0.9, fontsize=8)
 axes[1].grid(True, alpha=0.3)
 
 # Subplot 3: Grid Interaction
-axes[2].set_title("Grid Power Exchange", fontsize=9, fontweight='bold')
+axes[2].set_title("Grid Power Exchange", fontsize=11, fontweight='bold')
 axes[2].fill_between(time_axis, 0, history["grid_export"], color='#32CD32', alpha=0.6, label='Export to Grid')
 axes[2].fill_between(time_axis, 0, [-x for x in history["grid_import"]], color='#FF6347', alpha=0.6, label='Import from Grid')
 axes[2].axhline(y=0, color='black', linestyle='-', linewidth=1)
 axes[2].set_ylabel("Power (kW)", fontweight='bold')
 axes[2].set_xlabel("Time (Hours)", fontweight='bold')
-axes[2].legend(loc="upper left", bbox_to_anchor=(1.01, 1), framealpha=0.9, fontsize=6)
+axes[2].legend(loc="upper left", bbox_to_anchor=(1.01, 1), framealpha=0.9, fontsize=8)
 axes[2].grid(True, alpha=0.3)
 
 # Format x-axis
@@ -312,7 +312,7 @@ if len(HOME_BATTERY_INDICES_AVAILABLE) > 0:
         else:
             hb_data = {"load": history["hb2_load"], "solar": history["hb2_solar"], "power": history["hb2_power"], "soc": history["soc_hb2"]}
         
-        ax.set_title(f"Home at Node {home_battery_idx} - Load, Solar, Battery Operations & State of Charge", fontsize=10, fontweight='bold')
+        ax.set_title(f"Home at Node {home_battery_idx} - Load, Solar, Battery Operations & State of Charge", fontsize=12, fontweight='bold')
         
         # Left y-axis: Power flows
         ax.plot(time_axis, hb_data["load"], color='#1E90FF', linewidth=1, label='Load Demand', alpha=0.8)
@@ -338,7 +338,7 @@ if len(HOME_BATTERY_INDICES_AVAILABLE) > 0:
         # Combined legend
         lines, labels = ax.get_legend_handles_labels()
         lines_r, labels_r = ax_right.get_legend_handles_labels()
-        ax.legend(lines + lines_r, labels + labels_r, loc="upper left", bbox_to_anchor=(1.03, 1), framealpha=0.9, fontsize=6)
+        ax.legend(lines + lines_r, labels + labels_r, loc="upper left", bbox_to_anchor=(1.03, 1), framealpha=0.9, fontsize=8)
         ax.grid(True, alpha=0.3)
         
         if plot_idx == len(HOME_BATTERY_INDICES_AVAILABLE) - 1:
@@ -348,6 +348,9 @@ if len(HOME_BATTERY_INDICES_AVAILABLE) > 0:
     for ax in axes:
         ax.set_xticks(np.arange(0, 25, 2))
         ax.set_xlim(0, 24)
+        ax.set_ylabel("Power (kW)", fontweight='bold')  # Missing in original, but adding formatting
+    
+    axes[-1].set_xlabel("Time (Hours)", fontweight='bold')
     
     plt.subplots_adjust(left=0.06, bottom=0.08, right=0.85, top=0.95, hspace=0.25)
     output_file_3 = f"{SCENARIO_FOLDER}/1_5_home_batteries.png"
@@ -367,7 +370,7 @@ print("[INFO] Generating Figure 4 (Voltage Profiles)...")
 fig4, axes = plt.subplots(3, 1, figsize=(16, 10), sharex=True)
 
 # Plot 1: BESS Node Voltage
-axes[0].set_title("Voltage at BESS Connection Point", fontsize=10, fontweight='bold')
+axes[0].set_title("Voltage at BESS Connection Point", fontsize=12, fontweight='bold')
 axes[0].plot(time_axis, voltage_matrix[:, BESS_NODE_INDEX], color='#FF4500', linewidth=1.5, label=f'Node {BESS_NODE_INDEX} (BESS)')
 axes[0].axhline(y=1.06, color='black', linestyle='--', linewidth=1.5, label='Upper Limit (1.06 p.u.)')
 axes[0].axhline(y=1.00, color='gray', linestyle=':', linewidth=1, alpha=0.7, label='Nominal (1.00 p.u.)')
@@ -375,11 +378,11 @@ axes[0].axhline(y=0.94, color='black', linestyle='--', linewidth=1.5, label='Low
 axes[0].fill_between(time_axis, 0.94, 1.06, color='green', alpha=0.1, label='Safe Zone')
 axes[0].set_ylabel("Voltage (p.u.)", fontweight='bold')
 axes[0].set_ylim(0.85, 1.15)
-axes[0].legend(loc="upper left", bbox_to_anchor=(1.01, 1), framealpha=0.9, fontsize=6)
+axes[0].legend(loc="upper left", bbox_to_anchor=(1.01, 1), framealpha=0.9, fontsize=8)
 axes[0].grid(True, alpha=0.3)
 
 # Plot 2: Solar Nodes
-axes[1].set_title("Voltage Profiles at Solar-Connected Nodes", fontsize=10, fontweight='bold')
+axes[1].set_title("Voltage Profiles at Solar-Connected Nodes", fontsize=12, fontweight='bold')
 colors_solar = plt.cm.tab10(np.linspace(0, 1, len(SOLAR_NODE_INDICES)))
 for i, node_idx in enumerate(SOLAR_NODE_INDICES):
     axes[1].plot(time_axis, voltage_matrix[:, node_idx], label=f'Node {node_idx}', 
@@ -390,11 +393,11 @@ axes[1].axhline(y=1.00, color='gray', linestyle=':', linewidth=1, alpha=0.5)
 axes[1].fill_between(time_axis, 0.94, 1.06, color='green', alpha=0.1)
 axes[1].set_ylabel("Voltage (p.u.)", fontweight='bold')
 axes[1].set_ylim(0.85, 1.15)
-axes[1].legend(loc="upper left", bbox_to_anchor=(1.01, 1), ncol=2, framealpha=0.9, fontsize=6)
+axes[1].legend(loc="upper left", bbox_to_anchor=(1.01, 1), ncol=2, framealpha=0.9, fontsize=8)
 axes[1].grid(True, alpha=0.3)
 
 # Plot 3: Load-Only Nodes
-axes[2].set_title("Voltage Profiles at Load-Only Nodes", fontsize=10, fontweight='bold')
+axes[2].set_title("Voltage Profiles at Load-Only Nodes", fontsize=12, fontweight='bold')
 colors_load = plt.cm.tab10(np.linspace(0, 1, len(LOAD_ONLY_NODE_INDICES)))
 for i, node_idx in enumerate(LOAD_ONLY_NODE_INDICES):
     axes[2].plot(time_axis, voltage_matrix[:, node_idx], label=f'Node {node_idx}', 
@@ -406,7 +409,7 @@ axes[2].fill_between(time_axis, 0.90, 1.10, color='green', alpha=0.1)
 axes[2].set_ylabel("Voltage (p.u.)", fontweight='bold')
 axes[2].set_xlabel("Time (Hours)", fontweight='bold')
 axes[2].set_ylim(0.85, 1.15)
-axes[2].legend(loc="upper left", bbox_to_anchor=(1.01, 1), ncol=2, framealpha=0.9, fontsize=6)
+axes[2].legend(loc="upper left", bbox_to_anchor=(1.01, 1), ncol=2, framealpha=0.9, fontsize=8)
 axes[2].grid(True, alpha=0.3)
 
 # Format x-axis
@@ -430,7 +433,7 @@ fig5, axes = plt.subplots(2, 1, figsize=(16, 8), sharex=True)
 
 # Plot 1: Cumulative Reward
 cumulative_rewards = np.cumsum(history["rewards"])
-axes[0].set_title("Cumulative Reward Over Time", fontsize=10, fontweight='bold')
+axes[0].set_title("Cumulative Reward Over Time", fontsize=12, fontweight='bold')
 axes[0].plot(time_axis, cumulative_rewards, color='#2E8B57', linewidth=1.5)
 axes[0].fill_between(time_axis, 0, cumulative_rewards, color='#2E8B57', alpha=0.3)
 axes[0].set_ylabel("Cumulative Reward", fontweight='bold')
@@ -438,7 +441,7 @@ axes[0].grid(True, alpha=0.3)
 axes[0].axhline(y=0, color='black', linestyle='-', linewidth=0.8)
 
 # Plot 2: Instantaneous Reward
-axes[1].set_title("Instantaneous Reward per Timestep", fontsize=10, fontweight='bold')
+axes[1].set_title("Instantaneous Reward per Timestep", fontsize=12, fontweight='bold')
 axes[1].plot(time_axis, history["rewards"], color='#4169E1', linewidth=1.2)
 axes[1].fill_between(time_axis, 0, history["rewards"], where=np.array(history["rewards"])>0, 
                      color='#32CD32', alpha=0.4, label='Positive Reward')

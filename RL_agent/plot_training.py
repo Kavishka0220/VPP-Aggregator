@@ -8,7 +8,7 @@ from pathlib import Path
 # Set plotting style
 sns.set_style("whitegrid")
 plt.rcParams['figure.dpi'] = 150
-plt.rcParams['font.size'] = 10
+plt.rcParams['font.size'] = 20
 
 # Get script directory for absolute paths
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -113,15 +113,15 @@ def plot_training_rewards(data, output_dir='./results_plots'):
     ax.axhline(y=max_reward, color='green', linestyle=':', linewidth=1.5, alpha=0.6)
     ax.axhline(y=mean_reward, color='orange', linestyle=':', linewidth=1.5, alpha=0.6)
     
-    ax.set_title('Training Reward Over Time', fontsize=14, fontweight='bold')
-    ax.set_xlabel('Training Steps (Timesteps)', fontweight='bold', fontsize=11)
-    ax.set_ylabel('Mean Episode Reward', fontweight='bold', fontsize=11)
+    ax.set_title('Training Reward Over Time', fontsize=24, fontweight='bold')
+    ax.set_xlabel('Training Steps (Timesteps)', fontweight='bold', fontsize=21)
+    ax.set_ylabel('Mean Episode Reward', fontweight='bold', fontsize=21)
     ax.grid(True, alpha=0.3)
-    ax.legend(loc='lower right', fontsize=10)
+    ax.legend(loc='lower right', fontsize=20)
     
     # Add statistics box
     stats_text = f'Max: {max_reward:.2f}\nMin: {min_reward:.2f}\nMean: {mean_reward:.2f}\nFinal: {final_reward:.2f}'
-    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=11,
+    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=16,
             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8, pad=0.8),
             fontweight='bold', family='monospace')
     
@@ -177,10 +177,10 @@ def plot_multiple_runs(base_dir='./tensorboard_logs', output_dir='./results_plot
             
             ax.plot(steps, rewards, color=colors[idx], linewidth=1.5, alpha=0.7, label=run_dir.name)
     
-    ax.set_title('Training Reward Comparison: Multiple Runs', fontsize=12, fontweight='bold')
+    ax.set_title('Training Reward Comparison: Multiple Runs', fontsize=22, fontweight='bold')
     ax.set_xlabel('Training Steps (Timesteps)', fontweight='bold')
     ax.set_ylabel('Mean Episode Reward', fontweight='bold')
-    ax.legend(loc='best', fontsize=8)
+    ax.legend(loc='best', fontsize=18)
     ax.grid(True, alpha=0.3)
     
     plt.tight_layout()

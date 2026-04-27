@@ -385,7 +385,7 @@ def print_economics(model_path="checkpoints/best_model/best_model", num_episodes
 
     output_dir = os.path.join(os.path.dirname(current_dir), "results_plots")
     os.makedirs(output_dir, exist_ok=True)
-    summary_file = os.path.join(output_dir, "economics_summary_detailed.txt")
+    summary_file = os.path.join(output_dir, "economics_summary.txt")
     report_lines = [
         "=" * 100,
         "VPP AGGREGATOR - COMPREHENSIVE ECONOMIC BENEFITS ANALYSIS".center(100),

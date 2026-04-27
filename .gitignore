@@ -265,3 +265,6 @@ results_plots/night_peak/3_rewards.png
 results_plots/night_peak/detailed_simulation_results.csv
 results_plots/training_comparison.png
 results_plots/daytime_peak/3_rewards.png
+battery_cycling_latex.tex
+results_plots/night_peak/3_rewards.png
+cycling_penalty_benchmarks.tex

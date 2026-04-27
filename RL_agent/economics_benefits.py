@@ -22,6 +22,9 @@ BESS_LIFESPAN_YEARS = 10
 HOME_BATTERY_CAPITAL_COST_LKR = 70_000  # Per home battery (13.5 kWh @ ~5,000-10,000 per kWh) in LKR
 HOME_BATTERY_LIFESPAN_YEARS = 10
 
+# ===== DEFAULT SCENARIO (Change this to switch scenarios) =====
+DEFAULT_SCENARIO = "cloudy_day"  # Options: "cloudy_day", "daytime_peak", "intermittent_solar", "low_load_weekend", "night_peak", "solar_unavailable_day", None (for default)
+
 # ===== TIME PERIOD DEFINITIONS =====
 TIME_PERIODS = {
     'daytime': (6, 18),    # 6am-6pm
@@ -361,7 +364,10 @@ def _write_summary_report(report_lines, output_path):
         f.write("\n".join(report_lines))
 
 
-def print_economics(model_path="checkpoints/best_model/best_model", num_episodes=1, scenario_name="night_peak"):
+def print_economics(model_path="checkpoints/best_model/best_model", num_episodes=1, scenario_name=None):
+    # Use default scenario if not specified
+    if scenario_name is None:
+        scenario_name = DEFAULT_SCENARIO
     """
     Test the trained model and print economic benefits breakdown.
     Separates benefits between aggregator and individual prosumers/consumers.
@@ -673,7 +679,7 @@ if __name__ == "__main__":
                        help="Path to trained model (without .zip)")
     parser.add_argument("--episodes", type=int, default=1,
                        help="Number of episodes to run")
-    parser.add_argument("--scenario", type=str, default="night_peak",
+    parser.add_argument("--scenario", type=str, default=DEFAULT_SCENARIO,
                        help="Scenario name to use")
     
     args = parser.parse_args()

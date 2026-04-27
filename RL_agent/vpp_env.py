@@ -426,25 +426,27 @@ class UrbanVPPEnv(gym.Env):
                 desired_power = 0.0  # Prevent charging when battery full
 
             # --- CONSTRAINT 2: BESS CHARGING STRATEGY ---
-            # BESS prefers solar but can use cheap off-peak grid power (12am-6am, 21 LKR)
-            # to ensure sufficient charge for peak hour discharge
+            # PRIORITY 1: Charge from solar surplus during daytime (BEFORE off-peak grid)
+            # PRIORITY 2: Only use off-peak grid if solar insufficient
             if is_bess and desired_power < 0:  # BESS trying to charge
                 # Always block charging during 11pm-12am transition
                 if 23 <= hour:
                     desired_power = 0.0
                 # PRIORITY: If there's solar surplus available, MUST use it, NOT grid
-                # Block ALL grid charging during daytime (6am-6pm) when solar surplus exists
+                # Force solar charging during daytime (6am-6pm) when solar surplus exists
                 elif 6 <= hour < 18 and net_solar_surplus > 0:
                     # Solar surplus during daytime - charge from solar ONLY, not grid
                     # Keep charging if BESS not full, set intensity based on surplus
                     if self.soc[i] < 0.8:
                         charge_intensity = min(1.0, net_solar_surplus / self.bess_power)
-                        desired_power = -charge_intensity * p_max  # Override to solar charging
+                        desired_power = -charge_intensity * p_max  # FORCE solar charging
+                        if self.verbose:
+                            print(f"[FORCE_SOLAR] Hour {hour:.1f}: BESS forced to charge from {net_solar_surplus:.1f}kW surplus")
                     else:
-                        desired_power = 0.0  # BESS full, no charging
+                        desired_power = 0.0  # BESS full, no more charging
                 # Block grid charging outside off-peak if solar is insufficient
-                elif net_solar_surplus <= 0 and hour >= 6:
-                    desired_power = 0.0  # Only allow off-peak (0am-6am) when no solar
+                elif net_solar_surplus <= 0 and 6 <= hour < 18:
+                    desired_power = 0.0  # Daytime without solar - only off-peak allowed
                     
             # CRITICAL: Prevent BESS DISCHARGE when there's solar surplus during daytime
             # Stay charged for peak hours instead of wasting solar
@@ -454,6 +456,23 @@ class UrbanVPPEnv(gym.Env):
                     desired_power = 0.0
                     if self.verbose:
                         print(f"[BLOCK_DISCHARGE] Hour {(self.current_step % 96)/4:.1f}: Blocked BESS discharge during daytime with solar surplus {net_solar_surplus:.2f}kW")
+            
+            # NEW: Limit BESS discharge power to prevent overvoltage at end-of-feeder
+            if is_bess and desired_power > 0:
+                # Reduce discharge intensity if solar production is high (leads to overvoltage)
+                if total_solar > 0.8 * self.remaining_demand:  # High solar relative to demand
+                    # Limit BESS discharge to avoid pushing voltage up
+                    max_bess_discharge = 0.5 * p_max  # Cap at 50% of max power
+                    desired_power = min(desired_power, max_bess_discharge)
+                    if self.verbose:
+                        print(f"[LIMIT_DISCHARGE] Hour {(self.current_step % 96)/4:.1f}: Limited BESS discharge to {desired_power:.1f}kW (high solar)")
+            
+            # NEW: Limit solar + BESS combined injection to prevent overvoltage
+            if total_solar + np.maximum(0, desired_power) > total_load + 5.0:
+                # Too much generation - reduce battery discharge
+                excess = total_solar + np.maximum(0, desired_power) - total_load - 5.0
+                if is_bess and desired_power > 0:
+                    desired_power = max(0, desired_power - excess * 0.5)
             
             # --- CONSTRAINT 3: Home Battery Daytime Solar Charging ---
             # Home batteries prefer solar during daytime but MUST use it if available
@@ -602,23 +621,36 @@ class UrbanVPPEnv(gym.Env):
         # ----- SECTION 1: DAYTIME / SOLAR HOURS (6am-6pm) -----
         # Strategy: Charge from excess solar ONLY, save for evening peak
         daytime_solar_bonus = 0.0
+        solar_waste_penalty = 0.0
         if 6 <= hour < 18:  # Daytime hours
             total_charge_power = np.sum(np.minimum(0, self.node_battery_power_kw))  # Negative when charging
             total_discharge_power = np.sum(np.maximum(0, self.node_battery_power_kw))  # Positive when discharging
             
             if net_solar_surplus > 0:
                 # Solar surplus available: STRONG reward for charging from excess solar
-                # Coefficient 26 represents the arbitrage profit (45 LKR peak - 19 LKR daytime export)
-                daytime_solar_bonus += 26.0 * (-total_charge_power)  # Reward proportional to arbitrage
+                # Coefficient 50 = 26 LKR arbitrage profit + 24 LKR certainty premium (vs selling at 19 LKR)
+                daytime_solar_bonus += 50.0 * (-total_charge_power)  # INCREASED from 26.0
                 
                 # Extra incentive for BESS to absorb community solar (priority target)
                 bess_charge_power = np.minimum(0, self.node_battery_power_kw[self.bess_index])
                 surplus_factor = min(1.0, net_solar_surplus / 20.0)
-                daytime_solar_bonus += 26.0 * (-bess_charge_power) * (1.0 + surplus_factor)
+                daytime_solar_bonus += 50.0 * (-bess_charge_power) * (1.0 + surplus_factor)  # INCREASED from 26.0
+                
+                # SOLAR WASTE PENALTY: Penalize exported solar when batteries have available capacity
+                # Only penalize if batteries are not nearly full
+                avg_soc = np.mean(self.soc)
+                if avg_soc < 0.75:  # Batteries have room to charge
+                    # Calculate solar wasted (surplus not captured in batteries)
+                    solar_wasted = net_solar_surplus - (-total_charge_power)
+                    if solar_wasted > 0.5:  # Only penalize meaningful waste
+                        # 30 LKR per kW wasted (lost arbitrage opportunity)
+                        solar_waste_penalty = -30.0 * solar_wasted
+                        if self.verbose:
+                            print(f"[SOLAR_WASTE] Hour {hour:.1f}: {solar_wasted:.2f}kW solar exported despite {(0.75-avg_soc):.2%} battery capacity available → Penalty -{30.0*solar_wasted:.0f}")
             else:
                 # NO solar surplus - penalize BESS discharge during daytime to save for peak hours
                 bess_discharge_power = np.maximum(0, self.node_battery_power_kw[self.bess_index])
-                daytime_solar_bonus -= 26.0 * bess_discharge_power  # Penalty for losing arbitrage opportunity
+                daytime_solar_bonus -= 50.0 * bess_discharge_power  # INCREASED from 26.0
             
             
         
@@ -634,7 +666,7 @@ class UrbanVPPEnv(gym.Env):
         
         # ----- SECTION 3: OFF-PEAK (11pm-6am) -----
         # Strategy: HOME batteries and BESS can charge at cheap rates (21 LKR)
-        # BESS charges during off-peak to supplement insufficient daytime solar generation
+        # BESS charges during off-peak to supplement INSUFFICIENT daytime solar only
         # NOTE: Charging blocked between 11pm-12am
         offpeak_bonus = 0.0
         if hour < 6:  # Off-peak hours (12am-6am only)
@@ -722,11 +754,17 @@ class UrbanVPPEnv(gym.Env):
         
         total_violation = np.sum(over_voltage + under_voltage)
         
-        # Heavy Penalty: -100 per unit of violation
-        # Example: 0.01 p.u. deviation → -1 penalty
-        # Example: 0.01 p.u. deviation → -1 penalty
-        # voltage_penalty = -100.0 * total_violation
-        voltage_penalty = -100.0 * (total_violation ** 2)
+        # CRITICAL Penalty: Voltage violations are unacceptable
+        # Each 0.01 p.u. violation = -500 penalty
+        # Quadratic penalty ensures large violations are heavily punished
+        voltage_penalty = -500000.0 * (total_violation ** 2)  # INCREASED from 10000
+        
+        # NEW: VOLTAGE STABILITY BONUS - Reward tight voltage control
+        # Nodes staying in 0.97-1.03 p.u. get bonus (tighter band = better grid quality)
+        safe_margin_min = 0.97
+        safe_margin_max = 1.03
+        safe_nodes = np.sum((min_voltages >= safe_margin_min) & (max_voltages <= safe_margin_max))
+        voltage_stability_bonus = 5.0 * safe_nodes  # +5 per node in safe band
 
         # C. Battery Health & Smoothness
         # Penalize rapid power changes to reduce battery stress
@@ -754,9 +792,11 @@ class UrbanVPPEnv(gym.Env):
         reward = (revenue 
                   - cost 
                   + voltage_penalty 
-                  + daytime_solar_bonus      # Daytime solar charging (6am-6pm) + morning peak shaving
-                  + peak_bonus               # Peak discharge (6pm-11pm)
-                  + offpeak_bonus            # Off-peak charging (11pm-6am)
+                  + voltage_stability_bonus        # NEW: Reward tight voltage control
+                  + daytime_solar_bonus           # Daytime solar charging (6am-6pm) with increased 50.0 coefficient
+                  + solar_waste_penalty           # NEW: Penalize wasted solar exports
+                  + peak_bonus                    # Peak discharge (6pm-11pm)
+                  + offpeak_bonus                 # Off-peak charging (11pm-6am)
                   + cycling_cost
                   + soc_health_penalty)
         

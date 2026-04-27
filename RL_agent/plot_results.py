@@ -375,7 +375,7 @@ axes[0].plot(time_axis, voltage_matrix[:, BESS_NODE_INDEX], color='#FF4500', lin
 axes[0].axhline(y=1.06, color='black', linestyle='--', linewidth=1.5, label='Upper Limit (1.06 p.u.)')
 axes[0].axhline(y=1.00, color='gray', linestyle=':', linewidth=1, alpha=0.7, label='Nominal (1.00 p.u.)')
 axes[0].axhline(y=0.94, color='black', linestyle='--', linewidth=1.5, label='Lower Limit (0.94 p.u.)')
-axes[0].fill_between(time_axis, 0.94, 1.06, color='green', alpha=0.1, label='Safe Zone')
+#axes[0].fill_between(time_axis, 0.94, 1.06, color='green', alpha=0.1, label='Safe Zone')
 axes[0].set_ylabel("Voltage (p.u.)", fontweight='bold')
 axes[0].set_ylim(0.85, 1.15)
 axes[0].legend(loc="upper left", bbox_to_anchor=(1.01, 1), framealpha=0.9, fontsize=19)
@@ -390,7 +390,7 @@ for i, node_idx in enumerate(SOLAR_NODE_INDICES):
 axes[1].axhline(y=1.06, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
 axes[1].axhline(y=0.94, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
 axes[1].axhline(y=1.00, color='gray', linestyle=':', linewidth=1, alpha=0.5)
-axes[1].fill_between(time_axis, 0.94, 1.06, color='green', alpha=0.1)
+#axes[1].fill_between(time_axis, 0.94, 1.06, color='green', alpha=0.1)
 axes[1].set_ylabel("Voltage (p.u.)", fontweight='bold')
 axes[1].set_ylim(0.85, 1.15)
 axes[1].legend(loc="upper left", bbox_to_anchor=(1.01, 1), ncol=2, framealpha=0.9, fontsize=19)
@@ -402,10 +402,10 @@ colors_load = plt.cm.tab10(np.linspace(0, 1, len(LOAD_ONLY_NODE_INDICES)))
 for i, node_idx in enumerate(LOAD_ONLY_NODE_INDICES):
     axes[2].plot(time_axis, voltage_matrix[:, node_idx], label=f'Node {node_idx}', 
                 color=colors_load[i], linewidth=1.2, alpha=0.8)
-axes[2].axhline(y=1.10, color='black', linestyle='--', linewidth=1.5, alpha=0.7, label='Limits')
-axes[2].axhline(y=0.90, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
+axes[2].axhline(y=1.06, color='black', linestyle='--', linewidth=1.5, alpha=0.7, label='Limits')
+axes[2].axhline(y=0.94, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
 axes[2].axhline(y=1.00, color='gray', linestyle=':', linewidth=1, alpha=0.5)
-axes[2].fill_between(time_axis, 0.90, 1.10, color='green', alpha=0.1)
+#axes[2].fill_between(time_axis, 0.94, 1.06, color='green', alpha=0.1)
 axes[2].set_ylabel("Voltage (p.u.)", fontweight='bold')
 axes[2].set_xlabel("Time (Hours)", fontweight='bold')
 axes[2].set_ylim(0.85, 1.15)
@@ -462,6 +462,35 @@ plt.subplots_adjust(left=0.06, bottom=0.08, right=0.97, top=0.95, hspace=0.2)
 output_file_5 = f"{SCENARIO_FOLDER}/3_rewards.png"
 plt.savefig(output_file_5, dpi=300, bbox_inches='tight')
 print(f"[OK] Saved '{output_file_5}'")
+
+# ==========================================
+# FIGURE 6: BESS Voltage Profile (Enlarged from Figure 4 Plot 1)
+# ==========================================
+print("[INFO] Generating Figure 6 (BESS Voltage - Enlarged)...")
+fig6, ax = plt.subplots(1, 1, figsize=(16, 6))
+
+ax.set_title("Voltage Comparison: BESS and Node 1", fontsize=23, fontweight='bold')
+ax.plot(time_axis, voltage_matrix[:, BESS_NODE_INDEX], color="#002AFF", linewidth=1.5, label=f'Node {BESS_NODE_INDEX} (BESS)')
+ax.plot(time_axis, voltage_matrix[:, 1], color='#1E90FF', linewidth=1.5, label='Node 1')
+ax.axhline(y=1.06, color='black', linestyle='--', linewidth=1.5, label='Upper Limit (1.06 p.u.)')
+ax.axhline(y=1.00, color='gray', linestyle=':', linewidth=1.5, alpha=0.7, label='Nominal (1.00 p.u.)')
+ax.axhline(y=0.94, color='black', linestyle='--', linewidth=1.5, label='Lower Limit (0.94 p.u.)')
+#ax.fill_between(time_axis, 0.94, 1.06, color='green', alpha=0.1, label='Safe Zone')
+ax.set_ylabel("Voltage (p.u.)", fontweight='bold', fontsize=20)
+ax.set_xlabel("Time (Hours)", fontweight='bold', fontsize=20)
+ax.set_ylim(0.85, 1.15)
+ax.set_xticks(np.arange(0, 25, 2))
+ax.set_xlim(0, 24)
+ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1), framealpha=0.9, fontsize=19)
+ax.grid(True, alpha=0.3)
+
+plt.subplots_adjust(left=0.08, bottom=0.12, right=0.85, top=0.93)
+output_file_6 = f"{SCENARIO_FOLDER}/4_bess_voltage_enlarged.png"
+plt.savefig(output_file_6, dpi=300, bbox_inches='tight')
+print(f"[OK] Saved '{output_file_6}'")
+output_file_6_pdf = f"{SCENARIO_FOLDER}/4_bess_voltage_enlarged.pdf"
+plt.savefig(output_file_6_pdf, format='pdf', bbox_inches='tight')
+print(f"[OK] Saved '{output_file_6_pdf}'")
 
 # ==========================================
 # EXPORT DATA

@@ -107,11 +107,11 @@ def plot_training_rewards(data, output_dir='./results_plots'):
     if len(steps) > 10:
         z = np.polyfit(steps, rewards, 3)
         p = np.poly1d(z)
-        ax.plot(steps, p(steps), "--", color='#FF6347', linewidth=2.5, alpha=0.8, label='Smoothed (window=5)')
+        #ax.plot(steps, p(steps), "--", color='#FF6347', linewidth=2.5, alpha=0.8, label='Smoothed (window=5)')
     
     # Add reference lines
-    ax.axhline(y=max_reward, color='green', linestyle=':', linewidth=1.5, alpha=0.6)
-    ax.axhline(y=mean_reward, color='orange', linestyle=':', linewidth=1.5, alpha=0.6)
+    ax.axhline(y=max_reward, color='green', linestyle=':', linewidth=1.5, alpha=0.6, label='Max Reward')
+    #ax.axhline(y=mean_reward, color='orange', linestyle=':', linewidth=1.5, alpha=0.6)
     
     ax.set_title('Training Reward Over Time', fontsize=24, fontweight='bold')
     ax.set_xlabel('Training Steps (Timesteps)', fontweight='bold', fontsize=21)
@@ -121,8 +121,9 @@ def plot_training_rewards(data, output_dir='./results_plots'):
     
     # Add statistics box
     stats_text = f'Max: {max_reward:.2f}\nMin: {min_reward:.2f}\nMean: {mean_reward:.2f}\nFinal: {final_reward:.2f}'
-    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=16,
-            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8, pad=0.8),
+    ax.text(0.97, 0.42, stats_text, transform=ax.transAxes, fontsize=16,
+            verticalalignment='top', horizontalalignment='right', 
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.85, pad=0.8),
             fontweight='bold', family='monospace')
     
     plt.tight_layout()

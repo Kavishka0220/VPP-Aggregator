@@ -21,7 +21,7 @@ STATS_PATH = os.path.join(script_dir, "checkpoints", "best_model", "vecnormalize
 OUTPUT_DIR = os.path.join(os.path.dirname(script_dir), "results_plots")  # Where to save plots
 
 steps_to_plot = 96  # One day (15 min intervals)
-SCENARIO_NAME = "Next_Day_Forecast_21_nodes" # Set to same as train.py (e.g. "heatwave_day") or None for default
+SCENARIO_NAME = "night_peak" # Set to same as train.py (e.g. "heatwave_day") or None for default
  
 # Node configuration
 SOLAR_NODE_INDICES = [3, 5, 7, 10, 11, 13, 15, 17, 18, 19, 20]
@@ -291,12 +291,68 @@ plt.savefig(output_file_2_pdf, format='pdf', bbox_inches='tight')
 print(f"[OK] Saved '{output_file_2_pdf}'")
 
 # ==========================================
+# FIGURE 3: BESS Power Exchange & Voltage (Combined - Dual Axis)
 # ==========================================
-# FIGURE 3: Home Batteries - Detailed Per-Home Analysis (if available)
+print("[INFO] Generating Figure 3 (BESS Power & Voltage Combined)...")
+fig_bess = plt.figure(figsize=(18, 9))
+ax_power = fig_bess.add_subplot(111)
+
+# Plot 1: BESS Power (Left Axis)
+ax_power.set_title("BESS Power Exchange and Voltage at BESS Node", fontsize=28, fontweight='bold', pad=20)
+line_power = ax_power.plot(time_axis, history["bess_power"], color='#32CD32', linewidth=3.5, label='BESS Power', alpha=0.85, zorder=3)
+ax_power.fill_between(time_axis, 0, history["bess_power"], where=np.array(history["bess_power"])>0, 
+                      color='#32CD32', alpha=0.25, label='Discharge (Export)', zorder=2)
+ax_power.fill_between(time_axis, 0, history["bess_power"], where=np.array(history["bess_power"])<0, 
+                      color='#FF6347', alpha=0.25, label='Charge (Import)', zorder=2)
+ax_power.axhline(y=0, color='black', linestyle='-', linewidth=1.2, alpha=0.6, zorder=1)
+ax_power.set_ylabel("BESS Power (kW)", fontweight='bold', color='#32CD32', fontsize=26)
+ax_power.tick_params(axis='y', labelcolor='#32CD32', labelsize=23)
+ax_power.tick_params(axis='x', labelsize=23)
+ax_power.set_xlabel("Time (Hours)", fontweight='bold', fontsize=26)
+ax_power.grid(True, alpha=0.25, linestyle='--', linewidth=0.7)
+ax_power.set_xticks(np.arange(0, 25, 2))
+ax_power.set_xlim(0, 24)
+
+# Plot 2: BESS Voltage (Right Axis - Dual Axis)
+ax_voltage = ax_power.twinx()
+line_voltage = ax_voltage.plot(time_axis, voltage_matrix[:, BESS_NODE_INDEX], color='#FF4500', linewidth=3.5, label='BESS Node Voltage', alpha=0.85, zorder=4, linestyle='-')
+ax_voltage.axhline(y=1.06, color='red', linestyle='--', linewidth=2.5, alpha=0.7, label='Upper Limit (1.06 p.u.)', zorder=1)
+ax_voltage.axhline(y=1.00, color='gray', linestyle=':', linewidth=2, alpha=0.5, label='Nominal (1.00 p.u.)', zorder=1)
+ax_voltage.axhline(y=0.94, color='red', linestyle='--', linewidth=2.5, alpha=0.7, label='Lower Limit (0.94 p.u.)', zorder=1)
+ax_voltage.fill_between(time_axis, 0.94, 1.06, color='green', alpha=0.08, label='Safe Operating Zone', zorder=0)
+ax_voltage.set_ylabel("Voltage (p.u.)", fontweight='bold', color='#FF4500', fontsize=26)
+ax_voltage.tick_params(axis='y', labelcolor='#FF4500', labelsize=23)
+ax_voltage.set_ylim(0.88, 1.14)
+
+# Combined Legend
+lines_power = line_power + [ax_power.fill_between([], [], [], color='#32CD32', alpha=0.25),
+                            ax_power.fill_between([], [], [], color='#FF6347', alpha=0.25)]
+lines_voltage = line_voltage + [ax_voltage.plot([], [], color='red', linestyle='--', linewidth=2.5)[0],
+                                ax_voltage.plot([], [], color='gray', linestyle=':', linewidth=2)[0],
+                                ax_voltage.plot([], [], color='red', linestyle='--', linewidth=2.5)[0],
+                                ax_voltage.fill_between([], [], [], color='green', alpha=0.08)]
+labels_power = ['BESS Power', 'Discharge (Export)', 'Charge (Import)']
+labels_voltage = ['BESS Node Voltage', 'Upper Limit (1.06 p.u.)', 'Nominal (1.00 p.u.)', 'Lower Limit (0.94 p.u.)', 'Safe Zone']
+
+ax_power.legend(lines_power + lines_voltage, labels_power + labels_voltage, 
+               loc='upper left', fontsize=22, framealpha=0.95, edgecolor='black', fancybox=True, shadow=True)
+
+plt.tight_layout()
+output_file_bess = f"{SCENARIO_FOLDER}/3_bess_power_voltage_combined.png"
+plt.savefig(output_file_bess, dpi=300, bbox_inches='tight')
+print(f"[OK] Saved '{output_file_bess}'")
+output_file_bess_pdf = f"{SCENARIO_FOLDER}/3_bess_power_voltage_combined.pdf"
+plt.savefig(output_file_bess_pdf, format='pdf', bbox_inches='tight')
+print(f"[OK] Saved '{output_file_bess_pdf}'")
+plt.close(fig_bess)
+
+# ==========================================
+# ==========================================
+# FIGURE 4: Home Batteries - Detailed Per-Home Analysis (if available)
 # ==========================================
 # Only create this plot if at least one home battery exists
 if len(HOME_BATTERY_INDICES_AVAILABLE) > 0:
-    print("[INFO] Generating Figure 3 (Home Batteries Details)...")
+    print("[INFO] Generating Figure 4 (Home Batteries Details)...")
     fig3, axes = plt.subplots(len(HOME_BATTERY_INDICES_AVAILABLE), 1, figsize=(16, 5 * len(HOME_BATTERY_INDICES_AVAILABLE)), sharex=True)
     
     # Ensure axes is always a list (in case of single subplot)
@@ -364,9 +420,9 @@ else:
     output_file_3 = None
 
 # ==========================================
-# FIGURE 4: Voltage Profiles (All Nodes)
+# FIGURE 5: Voltage Profiles (All Nodes)
 # ==========================================
-print("[INFO] Generating Figure 4 (Voltage Profiles)...")
+print("[INFO] Generating Figure 5 (Voltage Profiles)...")
 fig4, axes = plt.subplots(3, 1, figsize=(16, 10), sharex=True)
 
 # Plot 1: BESS Node Voltage
@@ -426,9 +482,9 @@ plt.savefig(output_file_4_pdf, format='pdf', bbox_inches='tight')
 print(f"[OK] Saved '{output_file_4_pdf}'")
 
 # ==========================================
-# FIGURE 5: Economic Performance & Rewards
+# FIGURE 6: Economic Performance & Rewards
 # ==========================================
-print("[INFO] Generating Figure 5 (Economics & Rewards)...")
+print("[INFO] Generating Figure 6 (Economics & Rewards)...")
 fig5, axes = plt.subplots(2, 1, figsize=(16, 8), sharex=True)
 
 # Plot 1: Cumulative Reward

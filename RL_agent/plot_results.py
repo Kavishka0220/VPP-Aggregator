@@ -319,7 +319,7 @@ line_voltage = ax_voltage.plot(time_axis, voltage_matrix[:, BESS_NODE_INDEX], co
 ax_voltage.axhline(y=1.06, color='red', linestyle='--', linewidth=2.5, alpha=0.7, label='Upper Limit (1.06 p.u.)', zorder=1)
 ax_voltage.axhline(y=1.00, color='gray', linestyle=':', linewidth=2, alpha=0.5, label='Nominal (1.00 p.u.)', zorder=1)
 ax_voltage.axhline(y=0.94, color='red', linestyle='--', linewidth=2.5, alpha=0.7, label='Lower Limit (0.94 p.u.)', zorder=1)
-ax_voltage.fill_between(time_axis, 0.94, 1.06, color='green', alpha=0.08, label='Safe Operating Zone', zorder=0)
+#ax_voltage.fill_between(time_axis, 0.94, 1.06, color='green', alpha=0.08, label='Safe Operating Zone', zorder=0)
 ax_voltage.set_ylabel("Voltage (p.u.)", fontweight='bold', color='#FF4500', fontsize=26)
 ax_voltage.tick_params(axis='y', labelcolor='#FF4500', labelsize=23)
 ax_voltage.set_ylim(0.88, 1.14)
@@ -335,7 +335,7 @@ labels_power = ['BESS Power', 'Discharge (Export)', 'Charge (Import)']
 labels_voltage = ['BESS Node Voltage', 'Upper Limit (1.06 p.u.)', 'Nominal (1.00 p.u.)', 'Lower Limit (0.94 p.u.)', 'Safe Zone']
 
 ax_power.legend(lines_power + lines_voltage, labels_power + labels_voltage, 
-               loc='upper left', fontsize=22, framealpha=0.95, edgecolor='black', fancybox=True, shadow=True)
+               loc='upper left', fontsize=22,bbox_to_anchor=(1.01, 1), framealpha=0.95, edgecolor='black', fancybox=True, shadow=True)
 
 plt.tight_layout()
 output_file_bess = f"{SCENARIO_FOLDER}/3_bess_power_voltage_combined.png"

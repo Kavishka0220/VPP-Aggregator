@@ -93,7 +93,15 @@ new storage.Batt3 bus1=N3.1.2.3 phases=3 kv=0.4 kwrated=5  kwhrated=13.5 %stored
 new storage.Batt5 bus1=N5.3 phases=1 kv=0.23 kwrated=5  kwhrated=13.5 %stored=50 state=idling dispmode=External %effcharge=95 %effdischarge=95
 new storage.BESS  bus1=NBESS.1.2.3 phases=3 kv=0.4 kwrated=40 kwhrated=200 %stored=50 state=idling dispmode=External %effcharge=95 %effdischarge=95
 
+! ========= CHARGING LOADS (for battery charging - prevents overvoltage from solar) =========
+! These loads model battery charging power consumption from the grid
+! They are dynamically updated when batteries charge (zero power when not charging)
+new load.ChargingLoad_Batt3 bus1=N3.1.2.3 phases=3 kv=0.4 kw=0 kvar=0
+new load.ChargingLoad_Batt5 bus1=N5.3 phases=1 kv=0.23 kw=0 kvar=0
+new load.ChargingLoad_BESS  bus1=NBESS.1.2.3 phases=3 kv=0.4 kw=0 kvar=0
+
 set voltagebases=[0.4]
 calcvoltagebases
 solve
+
 

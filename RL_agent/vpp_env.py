@@ -255,6 +255,53 @@ class UrbanVPPEnv(gym.Env):
         self.solar_episode = self.solar_episode * self.solar_mask
 
         return self._get_obs(), {}
+
+    def _max_charge_power_from_headroom(self, soc, cap, p_max):
+        """Maximum feasible charging power for one 15-minute step."""
+        if soc >= 0.8:
+            return 0.0
+        headroom_kwh = (0.8 - soc) * cap
+        return min(p_max, headroom_kwh / (0.25 * 0.95))
+
+    def _max_discharge_power_from_soc(self, soc, cap, p_max):
+        """Maximum feasible discharge power for one 15-minute step."""
+        if soc <= 0.2:
+            return 0.0
+        deliverable_kwh = (soc - 0.2) * cap * 0.95
+        return min(p_max, deliverable_kwh / 0.25)
+
+    def _compute_peak_import_target(self, hour):
+        """Spread BESS energy across the remaining peak window to flatten imports."""
+        if not (18 <= hour < 23):
+            return None
+
+        peak_end_step = min(self.max_steps, self.current_step + int((23 - hour) * 4))
+        if peak_end_step <= self.current_step:
+            return 0.0
+
+        future_load = np.sum(self.load_episode[self.current_step:peak_end_step], axis=1)
+        future_solar = np.sum(self.solar_episode[self.current_step:peak_end_step], axis=1)
+        future_net_demand = np.maximum(0.0, future_load - future_solar)
+
+        if future_net_demand.size == 0:
+            return 0.0
+
+        deliverable_energy_kwh = max(0.0, (self.soc[2] - 0.2) * self.bess_cap * 0.95)
+        if deliverable_energy_kwh <= 0.0:
+            return float(np.max(future_net_demand))
+
+        low = 0.0
+        high = float(np.max(future_net_demand))
+        for _ in range(24):
+            mid = 0.5 * (low + high)
+            shaved_profile = np.minimum(np.maximum(future_net_demand - mid, 0.0), self.bess_power)
+            required_energy_kwh = np.sum(shaved_profile) * 0.25
+            if required_energy_kwh > deliverable_energy_kwh:
+                low = mid
+            else:
+                high = mid
+
+        return high
     
     def step(self, action):
         # --- 1. GET DATA FIRST (Moved to top) ---
@@ -279,6 +326,8 @@ class UrbanVPPEnv(gym.Env):
         net_solar_surplus = total_solar - total_load # Positive if surplus
         home_solar_surplus = full_solar_profile - full_load_profile  # Per-house surplus
         self.remaining_demand = net_demand # Decreases as we iterate batteries
+        remaining_solar_surplus = max(0.0, net_solar_surplus)
+        peak_import_target = self._compute_peak_import_target(hour)
         
         # --- AUTOMATIC BESS CHARGING LOGIC ---
         action_modified = action.copy()
@@ -305,6 +354,17 @@ class UrbanVPPEnv(gym.Env):
             # Daytime but NO solar surplus - BESS trying to discharge (should be blocked!)
             if self.verbose:
                 print(f"[NO_SOLAR] Hour {(self.current_step % 96)/4:.1f}: No surplus (Solar={total_solar:.2f}, Load={total_load:.2f}), solar_surplus={net_solar_surplus:.2f}")
+
+        # Strategy 1c: During peak hours, vary BESS discharge to flatten grid imports.
+        if peak_import_target is not None:
+            shaped_bess_discharge = np.clip(net_demand - peak_import_target, 0.0, self.bess_power)
+            max_bess_discharge = self._max_discharge_power_from_soc(
+                bess_soc, self.bess_cap, self.bess_power
+            )
+            shaped_bess_discharge = min(shaped_bess_discharge, max_bess_discharge)
+            action_modified[bess_action_idx] = shaped_bess_discharge / self.bess_power if self.bess_power > 0 else 0.0
+            if self.verbose:
+                print(f"[PEAK_SHAPING] Hour {hour:.1f}: Target import {peak_import_target:.2f}kW, BESS discharge {shaped_bess_discharge:.2f}kW")
         
         # Strategy 1b: Also charge HOME batteries from solar surplus during daytime
         if 6 <= hour < 18 and net_solar_surplus > 0:
@@ -440,16 +500,16 @@ class UrbanVPPEnv(gym.Env):
                     desired_power = 0.0
                 # PRIORITY: If there's solar surplus available, MUST use it, NOT grid
                 # Force solar charging during daytime (6am-6pm) when solar surplus exists
-                elif 6 <= hour < 18 and net_solar_surplus > 0:
+                elif 6 <= hour < 18 and remaining_solar_surplus > 0:
                     # Solar surplus during daytime - charge from solar ONLY, not grid
-                    # BUT: Use LOWER intensity to allow home batteries to absorb surplus first
-                    # BESS is at end-of-feeder (Node 21) - high priority to avoid overvoltage
                     if self.soc[i] < 0.8:
-                        # Reduced intensity: only absorb surplus AFTER home batteries take their share
-                        charge_intensity = min(0.6, net_solar_surplus / (self.bess_power * 1.5))  # More conservative
-                        desired_power = -charge_intensity * p_max
+                        available_charge = min(
+                            remaining_solar_surplus,
+                            self._max_charge_power_from_headroom(self.soc[i], cap, p_max),
+                        )
+                        desired_power = -available_charge
                         if self.verbose:
-                            print(f"[FORCE_SOLAR_CONSERVATIVE] Hour {hour:.1f}: BESS charging at {charge_intensity:.2f} intensity (letting home batteries absorb first)")
+                            print(f"[FORCE_SOLAR_CHARGE] Hour {hour:.1f}: BESS absorbing {available_charge:.2f}kW of remaining solar surplus")
                     else:
                         desired_power = 0.0  # BESS full, no more charging
                 # Block grid charging outside off-peak if solar is insufficient
@@ -493,21 +553,13 @@ class UrbanVPPEnv(gym.Env):
             # This prevents solar from flowing all the way to BESS node (end-of-feeder overvoltage)
             if not is_bess and 6 <= hour < 18 and desired_power < 0:  # Home batt trying to charge
                 if net_solar_surplus > 0:
-                    # FORCE maximum charging from solar to absorb generation at source
-                    # Use local solar (at this node) first, then community surplus
-                    local_solar = full_solar_profile[node_idx]
-                    
-                    if local_solar > 0:
-                        # Strong preference for local solar - absorb at source node
-                        local_charge_intensity = min(1.0, local_solar / self.home_batt_power)
-                        desired_power = -local_charge_intensity * p_max
-                    else:
-                        # No local solar - absorb community surplus to prevent end-of-feeder overvoltage
-                        charge_intensity = min(1.0, net_solar_surplus / self.home_batt_power)
-                        desired_power = -charge_intensity * p_max
-                    
+                    available_charge = min(
+                        remaining_solar_surplus,
+                        self._max_charge_power_from_headroom(self.soc[i], cap, p_max),
+                    )
+                    desired_power = -available_charge
                     if self.verbose:
-                        print(f"[HOME_SOLAR_LOCAL] Hour {hour:.1f}: Node {node_idx} charging at {-desired_power/p_max:.2f} intensity (local_solar={local_solar:.1f}kW)")
+                        print(f"[HOME_SOLAR_LOCAL] Hour {hour:.1f}: Node {node_idx} absorbing {available_charge:.2f}kW before export")
                 elif net_solar_surplus <= 0:
                     # No solar surplus available - block daytime grid charging
                     desired_power = 0.0  # Block daytime grid charging for home batteries
@@ -537,10 +589,9 @@ class UrbanVPPEnv(gym.Env):
             # Ensure final power doesn't exceed physical limits
             final_power = np.clip(final_power, -p_max, p_max)
             
-            # NEW: Final voltage safety check - if BESS and discharge, verify voltage won't drop too far
-            if is_bess and final_power > 0 and self.voltages[self.bess_index] < 0.99:
-                # Voltage already low - reduce discharge further as final safeguard
-                voltage_factor = max(0.2, min(1.0, (self.voltages[self.bess_index] - 0.94) / (0.99 - 0.94)))
+            # Final voltage safety check: trim discharge only if local voltage is already high.
+            if is_bess and final_power > 0 and self.voltages[self.bess_index] > 1.03:
+                voltage_factor = max(0.2, min(1.0, (1.06 - self.voltages[self.bess_index]) / (1.06 - 1.03)))
                 final_power = final_power * voltage_factor
                 if self.verbose and voltage_factor < 1.0:
                     print(f"[VOLTAGE_SAFETY_CHECK] BESS voltage {self.voltages[self.bess_index]:.4f}p.u., reduced discharge to {final_power:.1f}kW (factor {voltage_factor:.1%})")
@@ -560,6 +611,12 @@ class UrbanVPPEnv(gym.Env):
             
             # Enforce strict SOC limits: 0.2 to 0.8 for battery health
             self.soc[i] = np.clip(self.soc[i], 0.2, 0.8)
+
+            if 6 <= hour < 18 and final_power < 0 and remaining_solar_surplus > 0:
+                remaining_solar_surplus = max(
+                    0.0,
+                    remaining_solar_surplus - min(-final_power, remaining_solar_surplus),
+                )
             
             self.node_battery_power_kw[node_idx] = final_power
             self.prev_batt_power[i] = final_power
@@ -668,7 +725,7 @@ class UrbanVPPEnv(gym.Env):
                 # Extra incentive for BESS to absorb community solar (priority target)
                 bess_charge_power = np.minimum(0, self.node_battery_power_kw[self.bess_index])
                 surplus_factor = min(1.0, net_solar_surplus / 20.0)
-                daytime_solar_bonus += 50.0 * (-bess_charge_power) * (1.0 + surplus_factor)  # INCREASED from 26.0
+                daytime_solar_bonus += 75.0 * (-bess_charge_power) * (1.0 + surplus_factor)  # INCREASED from 26.0
                 
                 # SOLAR WASTE PENALTY: Penalize exported solar when batteries have available capacity
                 # Only penalize if batteries are not nearly full
@@ -677,10 +734,10 @@ class UrbanVPPEnv(gym.Env):
                     # Calculate solar wasted (surplus not captured in batteries)
                     solar_wasted = net_solar_surplus - (-total_charge_power)
                     if solar_wasted > 0.5:  # Only penalize meaningful waste
-                        # 30 LKR per kW wasted (lost arbitrage opportunity)
-                        solar_waste_penalty = -30.0 * solar_wasted
+                        # 50 LKR per kW wasted (lost arbitrage opportunity)
+                        solar_waste_penalty = -50.0 * solar_wasted
                         if self.verbose:
-                            print(f"[SOLAR_WASTE] Hour {hour:.1f}: {solar_wasted:.2f}kW solar exported despite {(0.75-avg_soc):.2%} battery capacity available → Penalty -{30.0*solar_wasted:.0f}")
+                            print(f"[SOLAR_WASTE] Hour {hour:.1f}: {solar_wasted:.2f}kW solar exported despite {(0.75-avg_soc):.2%} battery capacity available → Penalty -{50.0*solar_wasted:.0f}")
             else:
                 # NO solar surplus - penalize BESS discharge during daytime to save for peak hours
                 bess_discharge_power = np.maximum(0, self.node_battery_power_kw[self.bess_index])
@@ -907,7 +964,8 @@ class UrbanVPPEnv(gym.Env):
             "voltage_penalty": voltage_penalty,
             "grid_smoothing_penalty": grid_smoothing_penalty,
             "grid_power_change": grid_power_change,
-            "current_grid_net": current_grid_net
+            "current_grid_net": current_grid_net,
+            "peak_import_target": peak_import_target
         }
 
         return obs, float(reward), terminated, truncated, info

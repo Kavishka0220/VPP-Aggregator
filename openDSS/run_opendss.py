@@ -94,18 +94,34 @@ class VPPDSSRunner:
         if abs(p_kw) < 1e-6:
             # Idle state - no power flow
             dss.Command(f"edit storage.{name} state=idling kw=0")
+            # Also zero out any associated charging load
+            load_name = f"ChargingLoad_{name}"
+            dss.Command(f"edit load.{load_name} kw=0")
             return
 
         if p_kw > 0:
             # Discharge: inject power to grid (acts as generator)
             dss.Command(f"edit storage.{name} state=discharging kw={p_kw}")
+            # Zero out charging load during discharge
+            load_name = f"ChargingLoad_{name}"
+            dss.Command(f"edit load.{load_name} kw=0")
         else:
-            # Charge: consume power from grid 
-            # OpenDSS storage charging doesn't work as expected
-            # Workaround: Model as additional load by adding equivalent load element
-            # Or: Keep storage idle and add the charging load separately
-            # For now: Use state=charging with positive kW (consume power)
-            dss.Command(f"edit storage.{name} state=charging kw={abs(p_kw)}")
+            # Charge: consume power from grid
+            # FIX: Model charging as explicit LOAD instead of storage "charging" mode
+            # OpenDSS storage charging mode doesn't properly absorb power, causing 
+            # overvoltage when solar generation is high. By setting storage to idle
+            # and using a load element, we properly model power consumption.
+            dss.Command(f"edit storage.{name} state=idling kw=0")
+            
+            # Model charging as a LOAD to properly consume power from grid
+            # This ensures power flows correctly and prevents overvoltage
+            charge_kw = abs(p_kw)
+            
+            # Use load name based on storage: "Batt3" -> "ChargingLoad_Batt3"
+            load_name = f"ChargingLoad_{name}"
+            
+            # Update charging load with the charging power
+            dss.Command(f"edit load.{load_name} kw={charge_kw} kvar=0")
 
     # ---------- read outputs ----------
     def get_total_losses(self) -> Tuple[float, float]:

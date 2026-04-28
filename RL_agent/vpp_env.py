@@ -81,6 +81,7 @@ class UrbanVPPEnv(gym.Env):
         self.max_steps = 96
         self.soc = np.ones(self.n_storage_units) * 0.5 
         self.prev_batt_power = np.zeros(self.n_storage_units)
+        self.prev_grid_net_power = 0.0  # Track previous grid net import/export for smoothing
         # We need 22 voltage values internally (for 3-phase monitoring)
         self.voltages = np.ones(self.n_nodes, dtype=np.float32)      # Min voltage per bus (RL sees this)
         self.voltages_min = np.ones(self.n_nodes, dtype=np.float32)  # For undervoltage checking
@@ -221,6 +222,7 @@ class UrbanVPPEnv(gym.Env):
         #self.soc = np.random.uniform(0.3, 0.7, size=3)
         self.soc = np.full(3, 0.2)
         self.prev_batt_power = np.zeros(self.n_storage_units)
+        self.prev_grid_net_power = 0.0  # Reset grid tracking
         # Reset voltages to 1.0 p.u. (nominal)
         self.voltages = np.ones(self.n_nodes, dtype=np.float32)
         self.voltages_min = np.ones(self.n_nodes, dtype=np.float32)
@@ -535,6 +537,14 @@ class UrbanVPPEnv(gym.Env):
             # Ensure final power doesn't exceed physical limits
             final_power = np.clip(final_power, -p_max, p_max)
             
+            # NEW: Final voltage safety check - if BESS and discharge, verify voltage won't drop too far
+            if is_bess and final_power > 0 and self.voltages[self.bess_index] < 0.99:
+                # Voltage already low - reduce discharge further as final safeguard
+                voltage_factor = max(0.2, min(1.0, (self.voltages[self.bess_index] - 0.94) / (0.99 - 0.94)))
+                final_power = final_power * voltage_factor
+                if self.verbose and voltage_factor < 1.0:
+                    print(f"[VOLTAGE_SAFETY_CHECK] BESS voltage {self.voltages[self.bess_index]:.4f}p.u., reduced discharge to {final_power:.1f}kW (factor {voltage_factor:.1%})")
+            
             # Update SoC (0.25 hour = 15 min timestep)
             eff = 0.95
             if final_power >= 0:  # Discharging
@@ -773,6 +783,30 @@ class UrbanVPPEnv(gym.Env):
                     else:
                         offpeak_bonus += -10.0 * bess_charge_power
 
+        # NEW: Grid Import/Export Smoothing Penalty
+        # Penalize rapid changes in grid flows to stabilize the grid
+        # Calculate current grid net power (positive = export to grid, negative = import from grid)
+        current_grid_net = np.sum(self.net_injection)  # Positive = injection, Negative = withdrawal
+        
+        # Calculate change from previous step (per 15-min interval)
+        grid_power_change = abs(current_grid_net - self.prev_grid_net_power)
+        
+        # Penalize large ramps in grid power (smoothing penalty)
+        # Allow reasonable ramps (3 kW per 15 min) without penalty
+        ramp_threshold = 3.0  # kW per 15-min step is reasonable
+        if grid_power_change > ramp_threshold:
+            # Excess ramp beyond threshold gets penalized
+            excess_ramp = grid_power_change - ramp_threshold
+            # Quadratic penalty: larger ramps are progressively more penalized
+            grid_smoothing_penalty = -0.5 * (excess_ramp ** 2)
+            if self.verbose:
+                print(f"[GRID_SMOOTHING] Hour {hour:.1f}: Grid power changed {grid_power_change:.2f}kW (was {self.prev_grid_net_power:.1f}, now {current_grid_net:.1f}) → Penalty {grid_smoothing_penalty:.1f}")
+        else:
+            grid_smoothing_penalty = 0.0
+        
+        # Store current grid net power for next step comparison
+        self.prev_grid_net_power = current_grid_net
+
         # B. Voltage Violation Penalty (0.94 to 1.06 p.u. limits)
         # Monitor all nodes for grid safety compliance (3-phase aware)
         critical_nodes = list(range(21)) + [self.bess_index]
@@ -830,6 +864,7 @@ class UrbanVPPEnv(gym.Env):
                   + solar_waste_penalty           # NEW: Penalize wasted solar exports
                   + peak_bonus                    # Peak discharge (6pm-11pm)
                   + offpeak_bonus                 # Off-peak charging (11pm-6am)
+                  + grid_smoothing_penalty        # NEW: Penalize rapid grid power changes
                   + cycling_cost
                   + soc_health_penalty)
         
@@ -869,7 +904,10 @@ class UrbanVPPEnv(gym.Env):
             "soc_home5": self.soc[1],
             "soc_bess": self.soc[2],
             "bess_power": self.node_battery_power_kw[self.bess_index],
-            "voltage_penalty": voltage_penalty
+            "voltage_penalty": voltage_penalty,
+            "grid_smoothing_penalty": grid_smoothing_penalty,
+            "grid_power_change": grid_power_change,
+            "current_grid_net": current_grid_net
         }
 
         return obs, float(reward), terminated, truncated, info

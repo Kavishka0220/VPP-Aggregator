@@ -30,7 +30,7 @@ from openDSS.run_opendss import VPPDSSRunner
 # ============================================================================
 # ⚙️  CONFIGURATION - Change scenario here
 # ============================================================================
-SCENARIO = "cloudy_day"  # Options: "night_peak", "daytime_peak", "solar_unavailable_day", "low_load_weekend", "cloudy_day", "intermittent_solar"
+SCENARIO = "night_peak"  # Options: "night_peak", "daytime_peak", "solar_unavailable_day", "low_load_weekend", "cloudy_day", "intermittent_solar"
 NUM_STEPS = 96           # 96 steps = 24 hours (15-min intervals)
 START_INDEX = 0          # Start from timestep 0
 # ============================================================================
@@ -229,10 +229,13 @@ def plot_baseline_vs_scenario(scenario_name="night_peak"):
     # Save figure in results_plots/{scenario_name}/
     output_dir = Path(parent_dir) / "results_plots" / scenario_name
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_fig = output_dir / f"baseline_voltages_{scenario_name}.png"
+    output_fig_png = output_dir / f"baseline_voltages_{scenario_name}.png"
+    output_fig_pdf = output_dir / f"baseline_voltages_{scenario_name}.pdf"
     plt.tight_layout()
-    plt.savefig(output_fig, dpi=150)
-    print(f"\n📊 Saved plot to: {output_fig}")
+    plt.savefig(output_fig_png, dpi=150)
+    plt.savefig(output_fig_pdf, bbox_inches='tight')
+    print(f"\n📊 Saved plot to: {output_fig_png}")
+    print(f"📊 Saved plot to: {output_fig_pdf}")
     plt.show()
 
 
@@ -286,10 +289,13 @@ def plot_node_comparison(scenario_name="night_peak", node1="NBESS", node2="N0"):
     ax.set_xlim([0, 24])
     
     # Save figure in results_plots/{scenario_name}/
-    output_fig = output_dir / f"voltage_comparison_{scenario_name}.png"
+    output_fig_png = output_dir / f"voltage_comparison_{scenario_name}.png"
+    output_fig_pdf = output_dir / f"voltage_comparison_{scenario_name}.pdf"
     plt.tight_layout()
-    plt.savefig(output_fig, dpi=150, bbox_inches='tight')
-    print(f"📊 Saved comparison plot to: {output_fig}")
+    plt.savefig(output_fig_png, dpi=150, bbox_inches='tight')
+    plt.savefig(output_fig_pdf, bbox_inches='tight')
+    print(f"📊 Saved comparison plot to: {output_fig_png}")
+    print(f"📊 Saved comparison plot to: {output_fig_pdf}")
     plt.show()
 
 

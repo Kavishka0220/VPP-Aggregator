@@ -718,14 +718,15 @@ class UrbanVPPEnv(gym.Env):
             total_discharge_power = np.sum(np.maximum(0, self.node_battery_power_kw))  # Positive when discharging
             
             if net_solar_surplus > 0:
-                # Solar surplus available: STRONG reward for charging from excess solar
-                # Coefficient 50 = 26 LKR arbitrage profit + 24 LKR certainty premium (vs selling at 19 LKR)
-                daytime_solar_bonus += 50.0 * (-total_charge_power)  # INCREASED from 26.0
+                # Solar surplus available: reward for charging from excess solar
+                # Reduced coefficient from 50 to 25 for stability
+                daytime_solar_bonus += 25.0 * (-total_charge_power)
                 
                 # Extra incentive for BESS to absorb community solar (priority target)
                 bess_charge_power = np.minimum(0, self.node_battery_power_kw[self.bess_index])
                 surplus_factor = min(1.0, net_solar_surplus / 20.0)
-                daytime_solar_bonus += 75.0 * (-bess_charge_power) * (1.0 + surplus_factor)  # INCREASED from 26.0
+                # Reduced from 75 to 35 for stability
+                daytime_solar_bonus += 35.0 * (-bess_charge_power) * (1.0 + surplus_factor)
                 
                 # SOLAR WASTE PENALTY: Penalize exported solar when batteries have available capacity
                 # Only penalize if batteries are not nearly full
@@ -734,22 +735,23 @@ class UrbanVPPEnv(gym.Env):
                     # Calculate solar wasted (surplus not captured in batteries)
                     solar_wasted = net_solar_surplus - (-total_charge_power)
                     if solar_wasted > 0.5:  # Only penalize meaningful waste
-                        # 50 LKR per kW wasted (lost arbitrage opportunity)
-                        solar_waste_penalty = -50.0 * solar_wasted
+                        # Reduced from 50 to 25 LKR per kW wasted
+                        solar_waste_penalty = -25.0 * solar_wasted
                         if self.verbose:
-                            print(f"[SOLAR_WASTE] Hour {hour:.1f}: {solar_wasted:.2f}kW solar exported despite {(0.75-avg_soc):.2%} battery capacity available → Penalty -{50.0*solar_wasted:.0f}")
+                            print(f"[SOLAR_WASTE] Hour {hour:.1f}: {solar_wasted:.2f}kW solar exported despite {(0.75-avg_soc):.2%} battery capacity available → Penalty -{25.0*solar_wasted:.0f}")
             else:
                 # NO solar surplus - penalize BESS discharge during daytime to save for peak hours
                 bess_discharge_power = np.maximum(0, self.node_battery_power_kw[self.bess_index])
-                daytime_solar_bonus -= 50.0 * bess_discharge_power  # INCREASED from 26.0
+                # Reduced from 50 to 25
+                daytime_solar_bonus -= 25.0 * bess_discharge_power
             
             # NEW: BONUS for HOME BATTERIES absorbing solar locally (prevents end-of-feeder overvoltage)
             # Home batteries at Nodes 3 & 5 reduce solar flow to BESS node (Node 21)
             home_batt_solar_charge = np.sum([np.minimum(0, self.node_battery_power_kw[idx]) 
                                              for idx in self.home_batt_indices])  # Negative when charging
             if home_batt_solar_charge < 0 and net_solar_surplus > 0:
-                # Reward home batteries for absorbing solar locally (40 LKR per kW to reduce BESS voltage rise)
-                daytime_solar_bonus += 40.0 * (-home_batt_solar_charge)
+                # Reward home batteries for absorbing solar locally (reduced from 40 to 20)
+                daytime_solar_bonus += 20.0 * (-home_batt_solar_charge)
                 if self.verbose:
                     print(f"[LOCAL_SOLAR_ABSORPTION] Hour {hour:.1f}: Home batteries absorbing {-home_batt_solar_charge:.2f}kW locally → Reduces BESS voltage rise")
             
@@ -761,8 +763,8 @@ class UrbanVPPEnv(gym.Env):
         if 18 <= hour < 23:  # Evening peak hours (6pm-11pm)
             if np.mean(self.soc) > 0.3:  # Only discharge if battery has energy
                 total_discharge_power = np.sum(np.maximum(0, self.node_battery_power_kw))
-                # Reward peak discharge with coefficient 45 (reflects peak price)
-                peak_bonus = 45.0 * total_discharge_power
+                # Reduced peak bonus coefficient from 45 to 25 for stability
+                peak_bonus = 25.0 * total_discharge_power
         
         # ----- SECTION 3: OFF-PEAK (11pm-6am) -----
         # Strategy: HOME batteries and BESS can charge at cheap rates (21 LKR)
@@ -803,10 +805,10 @@ class UrbanVPPEnv(gym.Env):
                 # Decision based on solar forecast (only for home batteries)
                 if solar_will_be_sufficient:
                     # PENALTY: Don't charge from grid, save capacity for solar
-                    offpeak_bonus = 8.0 * home_charge_power
+                    offpeak_bonus = 4.0 * home_charge_power  # Reduced from 8 to 4
                 else:
                     # REWARD: Charge at cheap off-peak rates (solar won't be enough)
-                    offpeak_bonus = -15.0 * home_charge_power
+                    offpeak_bonus = -8.0 * home_charge_power  # Reduced from -15 to -8
             
             # BESS OFF-PEAK CHARGING - Predictive Strategy
             # Reward BESS for intelligently pre-charging based on daytime solar forecast
@@ -828,17 +830,17 @@ class UrbanVPPEnv(gym.Env):
                     energy_needed = (0.75 - bess_soc) * self.bess_cap
                     
                     if expected_surplus_energy < energy_needed:
-                        # Daytime solar insufficient - STRONG reward for smart off-peak charging
-                        offpeak_bonus += -18.0 * bess_charge_power
+                        # Daytime solar insufficient - reward for smart off-peak charging (reduced from -18 to -10)
+                        offpeak_bonus += -10.0 * bess_charge_power
                     else:
-                        # Daytime solar will be sufficient - moderate reward (still economical at 21 LKR)
-                        offpeak_bonus += -8.0 * bess_charge_power
+                        # Daytime solar will be sufficient - moderate reward (reduced from -8 to -5)
+                        offpeak_bonus += -5.0 * bess_charge_power
                 else:
                     # Not enough lookahead data - reward based on SoC state
                     if bess_soc < 0.4:
-                        offpeak_bonus += -15.0 * bess_charge_power
+                        offpeak_bonus += -8.0 * bess_charge_power  # Reduced from -15
                     else:
-                        offpeak_bonus += -10.0 * bess_charge_power
+                        offpeak_bonus += -5.0 * bess_charge_power  # Reduced from -10
 
         # NEW: Grid Import/Export Smoothing Penalty
         # Penalize rapid changes in grid flows to stabilize the grid
@@ -848,14 +850,14 @@ class UrbanVPPEnv(gym.Env):
         # Calculate change from previous step (per 15-min interval)
         grid_power_change = abs(current_grid_net - self.prev_grid_net_power)
         
-        # Penalize large ramps in grid power (smoothing penalty)
-        # Allow reasonable ramps (3 kW per 15 min) without penalty
-        ramp_threshold = 3.0  # kW per 15-min step is reasonable
+        # IMPROVED: Penalize large ramps GENTLY to prevent oscillations
+        # Allow reasonable ramps (5 kW per 15 min) without penalty
+        ramp_threshold = 5.0  # kW per 15-min step is reasonable (increased from 3.0)
         if grid_power_change > ramp_threshold:
-            # Excess ramp beyond threshold gets penalized
+            # Excess ramp beyond threshold gets LINEAR penalty (not quadratic!)
             excess_ramp = grid_power_change - ramp_threshold
-            # Quadratic penalty: larger ramps are progressively more penalized
-            grid_smoothing_penalty = -0.5 * (excess_ramp ** 2)
+            # Linear penalty for stability: small penalty for gradual learning
+            grid_smoothing_penalty = -0.1 * excess_ramp  # Reduced from -0.5 * excess_ramp^2
             if self.verbose:
                 print(f"[GRID_SMOOTHING] Hour {hour:.1f}: Grid power changed {grid_power_change:.2f}kW (was {self.prev_grid_net_power:.1f}, now {current_grid_net:.1f}) → Penalty {grid_smoothing_penalty:.1f}")
         else:
@@ -878,17 +880,27 @@ class UrbanVPPEnv(gym.Env):
         
         total_violation = np.sum(over_voltage + under_voltage)
         
-        # CRITICAL Penalty: Voltage violations are unacceptable
-        # Each 0.01 p.u. violation = -500 penalty
-        # Quadratic penalty ensures large violations are heavily punished
-        voltage_penalty = -100000.0 * (total_violation ** 2)  # INCREASED from 100000
+        # IMPROVED: Gradient-based penalty that guides learning
+        # Use softer penalties that give gradient signal to improve
+        # Violation between 0 and 0.03 p.u: soft penalty (allows learning)
+        # Violation > 0.03 p.u: harder penalty (prevents severe violations)
+        soft_violations = np.minimum(0.03, over_voltage + under_voltage)
+        hard_violations = np.maximum(0, (over_voltage + under_voltage) - 0.03)
         
-        # NEW: VOLTAGE STABILITY BONUS - Reward tight voltage control
-        # Nodes staying in 0.97-1.03 p.u. get bonus (tighter band = better grid quality)
-        safe_margin_min = 0.97
-        safe_margin_max = 1.03
-        safe_nodes = np.sum((min_voltages >= safe_margin_min) & (max_voltages <= safe_margin_max))
-        voltage_stability_bonus = 5.0 * safe_nodes  # +5 per node in safe band
+        voltage_penalty = -50.0 * np.sum(soft_violations) - 500.0 * np.sum(hard_violations)
+        
+        # IMPROVED: VOLTAGE STABILITY BONUS - Reward nodes in safe bands
+        # Generous bonus for nodes in ideal range to guide agent
+        ideal_min = 0.98
+        ideal_max = 1.02
+        ideal_nodes = np.sum((min_voltages >= ideal_min) & (max_voltages <= ideal_max))
+        
+        acceptable_min = 0.94
+        acceptable_max = 1.06
+        acceptable_nodes = np.sum((min_voltages >= acceptable_min) & (max_voltages <= acceptable_max))
+        
+        # Bonus for ideal control + smaller bonus for acceptable control
+        voltage_stability_bonus = 20.0 * ideal_nodes + 5.0 * (acceptable_nodes - ideal_nodes)
 
         # C. Battery Health & Smoothness
         # Penalize rapid power changes to reduce battery stress
@@ -897,9 +909,9 @@ class UrbanVPPEnv(gym.Env):
                                       for node_idx in self.storage_map])
         power_changes = final_power_array - prev_batt_power_copy
         
-        # INCREASED cycling penalty to reduce alternating behavior
-        # Linear penalty for any changes + quadratic penalty for large changes
-        cycling_cost = -2.0 * np.sum(np.abs(power_changes)) - 3.0 * np.sum(power_changes ** 2) 
+        # Balanced cycling penalty - don't penalize smooth operation too much
+        # Focus penalty on sudden jumps only
+        cycling_cost = -0.3 * np.sum(np.abs(power_changes)) - 0.1 * np.sum(power_changes ** 2) 
         
         # D. SOC Health Penalty - Encourage keeping SOC in 0.2-0.8 range
         # This promotes battery longevity by avoiding deep discharge/overcharge
@@ -913,21 +925,34 @@ class UrbanVPPEnv(gym.Env):
                 soc_health_penalty -= 50.0 * (self.soc[i] - 0.8) ** 2
         
         # E. Total Reward
-        reward = (revenue 
-                  - cost 
+        # Improved balance between economic and technical objectives
+        reward = (revenue * 0.6                # Scale down economics (grid costs are high)
+                  - cost * 0.6                 # Scale down costs proportionally 
                   + voltage_penalty 
-                  + voltage_stability_bonus        # NEW: Reward tight voltage control
-                  + daytime_solar_bonus           # Daytime solar charging (6am-6pm) with increased 50.0 coefficient
-                  + solar_waste_penalty           # NEW: Penalize wasted solar exports
+                  + voltage_stability_bonus        # Reward tight voltage control
+                  + daytime_solar_bonus           # Daytime solar charging (6am-6pm)
+                  + solar_waste_penalty           # Penalize wasted solar exports
                   + peak_bonus                    # Peak discharge (6pm-11pm)
                   + offpeak_bonus                 # Off-peak charging (11pm-6am)
-                  + grid_smoothing_penalty        # NEW: Penalize rapid grid power changes
+                  + grid_smoothing_penalty        # Penalize rapid grid power changes (reduced)
                   + cycling_cost
                   + soc_health_penalty)
         
-        # Reward normalization - scale down to help with learning stability
-        # Reduced normalization to preserve strong economic signals
-        reward = reward / 5.0
+        # Reward normalization and clipping for stability
+        # Divide by higher value and clip to [-10, 10] range for stable learning
+        reward = reward / 10.0  # Normalized divisor for better gradient scaling
+        #reward = np.clip(reward, -20.0, 20.0)  # Allow wider range for better signal
+        
+        # Debug output for reward analysis (only when verbose)
+        if self.verbose and self.current_step % 24 == 0:  # Every 6 hours
+            print(f"[REWARD_DEBUG] Hour {hour:.1f}:")
+            print(f"  Economic: revenue={revenue:.0f}, cost={cost:.0f}, net={revenue-cost:.0f}, scaled={(revenue-cost)*0.6:.0f}")
+            print(f"  Voltages: min={np.min(min_voltages):.4f}, max={np.max(max_voltages):.4f}, penalty={voltage_penalty:.0f}, bonus={voltage_stability_bonus:.0f}")
+            print(f"  Battery: cycling_cost={cycling_cost:.0f}, soc_health={soc_health_penalty:.0f}")
+            print(f"  Bonuses: daytime={daytime_solar_bonus:.0f}, peak={peak_bonus:.0f}, offpeak={offpeak_bonus:.0f}")
+            total_pre_norm = (revenue*0.6 - cost*0.6 + voltage_penalty + voltage_stability_bonus + daytime_solar_bonus + solar_waste_penalty + peak_bonus + offpeak_bonus + grid_smoothing_penalty + cycling_cost + soc_health_penalty)
+            print(f"  Total reward (before norm): {total_pre_norm:.0f}")
+            print(f"  Total reward (after norm): {reward:.2f}")
 
         # --- 4. NEXT STEP TRANSITION ---
         self.current_step += 1

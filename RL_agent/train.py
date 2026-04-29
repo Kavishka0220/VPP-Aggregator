@@ -11,9 +11,12 @@ import numpy as np
 from vpp_env import UrbanVPPEnv
 
 def linear_schedule(initial_value: float):
-    """Linear learning rate schedule."""
+    """Linear learning rate schedule with exponential decay for stability."""
     def func(progress_remaining: float) -> float:
-        return progress_remaining * initial_value
+        # Exponential decay: more aggressive early, then stabilize
+        # Clamp to prevent negative values from creating complex numbers
+        progress_clamped = max(progress_remaining, 0.0)
+        return progress_clamped * initial_value * (progress_clamped ** 0.5)
     return func 
 
 
@@ -51,8 +54,11 @@ def main():
     os.makedirs(tensorboard_dir, exist_ok=True)
     os.makedirs(eval_dir, exist_ok=True)
     
+    # Get absolute path to data directory for subprocess environments
+    data_path = os.path.join(os.path.dirname(script_dir), "data")
+    
     print(f"[INFO] Checking environment validity for scenario: {scenario_name}...")
-    check_env(UrbanVPPEnv(data_path="./data", scenario_name=scenario_name), warn=True)
+    check_env(UrbanVPPEnv(data_path=data_path, scenario_name=scenario_name), warn=True)
     
     # 1. Create Training Environments (Multiple for parallel training)
     n_envs = 4  # Use 4 parallel environments for faster training
@@ -60,12 +66,9 @@ def main():
     # Calculate start_step from start_hour if specified
     start_step = start_hour * 4 if start_hour is not None else None
     
-    # Get absolute path to data directory for subprocess environments
-    data_path = os.path.join(os.path.dirname(script_dir), "data")
-    
     def make_env():
         def _init():
-            env = UrbanVPPEnv(data_path=data_path, scenario_name=scenario_name)
+            env = UrbanVPPEnv(data_path=data_path, scenario_name=scenario_name, verbose=False)
             env = Monitor(env)
             return env
         return _init
@@ -88,7 +91,7 @@ def main():
     if start_step is not None:
         def make_env_timed():
             def _init():
-                env = UrbanVPPEnv(data_path=data_path, scenario_name=scenario_name)
+                env = UrbanVPPEnv(data_path=data_path, scenario_name=scenario_name, verbose=False)
                 env = TimedResetWrapper(env, start_step, episode_length)
                 env = Monitor(env)
                 return env
@@ -109,26 +112,28 @@ def main():
     print(f"[INFO] Training with {n_envs} parallel environments")
     print(f"[INFO] Scenario: {scenario_name}")
 
-    # 2. Define the PPO Model with improved architecture
+    # 2. Define the PPO Model with improved stability
     policy_kwargs = dict(
-        net_arch=dict(pi=[256, 256], vf=[256, 256])  # Deeper network for complex VPP dynamics
+        net_arch=dict(pi=[256, 256], vf=[256, 256])  # Balanced architecture
     )
     
     model = PPO(
         "MlpPolicy", 
         env, 
         verbose=1,
-        learning_rate=linear_schedule(3e-4),  # Decaying LR for better convergence
-        gamma=0.995,                # Discount factor
-        gae_lambda=0.95,           # GAE smoothing
-        clip_range=0.2,            # PPO clipping parameter
-        n_epochs=10,               # Number of epochs per update
-        n_steps=2048,              # Steps per environment before update
-        batch_size=64,            # Larger batch for stable updates with 4 envs
-        ent_coef=0.005,            # Lower entropy for more focused policy
-        vf_coef=0.5,               # Value function coefficient
-        max_grad_norm=0.5,         # Gradient clipping
+        learning_rate=linear_schedule(3e-4),  # Reduced initial LR for stability
+        gamma=0.995,                 # Balanced discount factor
+        gae_lambda=0.98,            # Stronger GAE smoothing for stability
+        clip_range=0.2,             # Increased clip range to reduce instability
+        clip_range_vf=0.3,          # Value function clipping
+        n_epochs=15,                # More epochs for better convergence
+        n_steps=2048,               # Steps per environment before update
+        batch_size=64,             # Larger batch size for stability
+        ent_coef=0.01,              # Entropy coefficient for exploration
+        vf_coef=0.5,                # Value function coefficient
+        max_grad_norm=1.0,          # Increased gradient clipping threshold
         policy_kwargs=policy_kwargs,
+        target_kl=0.1,              # Early stopping threshold for stability
         seed=42,
         tensorboard_log=tensorboard_dir
     )
@@ -160,7 +165,7 @@ def main():
     callbacks = CallbackList([checkpoint_callback, eval_callback])
     
     # 4. Start Training
-    total_timesteps = 1_000_000  # Updated to 500k steps for stable convergence
+    total_timesteps = 1_000_000  # Updated to 1M steps for stable convergence
     print("[START] PPO Training...")
     print(f"   Target: {total_timesteps:,} Timesteps")
     print(f"   Checkpoints every: {checkpoint_callback.save_freq:,} steps")

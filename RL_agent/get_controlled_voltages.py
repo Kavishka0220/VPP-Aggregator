@@ -248,19 +248,22 @@ def plot_comparison(scenario_name=SCENARIO):
     #ax.axhspan(1.06, 1.15, alpha=0.1, color='orange', label='Overvoltage zone')
     
     # Formatting
-    ax.set_xlabel("Time (Hours)", fontsize=14)
-    ax.set_ylabel("Voltage (p.u.)", fontsize=14)
-    ax.set_title(f"BESS Voltage Control Impact - {scenario_name}", fontsize=16, fontweight='bold')
-    ax.legend(loc='best',fontsize=12)
+    ax.set_xlabel("Time (Hours)", fontsize=20)
+    ax.set_ylabel("Voltage (p.u.)", fontsize=20)
+    ax.set_title(f"BESS Voltage Control Impact - {scenario_name}", fontsize=22, fontweight='bold')
+    ax.legend(loc='best',fontsize=18)
     ax.grid(True, alpha=0.3)
     ax.set_ylim([0.85, 1.15])
     ax.set_xlim([0, 24])
     
     # Save
-    output_fig = output_dir / f"voltage_control_comparison_{scenario_name}.png"
+    output_fig_png = output_dir / f"voltage_control_comparison_{scenario_name}.png"
+    output_fig_pdf = output_dir / f"voltage_control_comparison_{scenario_name}.pdf"
     plt.tight_layout()
-    plt.savefig(output_fig, dpi=150, bbox_inches='tight')
-    print(f"📊 Saved comparison plot to: {output_fig}")
+    plt.savefig(output_fig_png, dpi=150, bbox_inches='tight')
+    plt.savefig(output_fig_pdf, bbox_inches='tight')
+    print(f"📊 Saved comparison plot to: {output_fig_png}")
+    print(f"📊 Saved comparison plot to: {output_fig_pdf}")
     plt.show()
 
 
@@ -290,9 +293,9 @@ def plot_bess_power_and_voltage(scenario_name=SCENARIO):
     # Top: BESS Power
     ax1.bar(hours, df["bess_power"], width=0.2, color='#0055CC', alpha=0.7, label='BESS Power')
     ax1.axhline(0, color='black', linestyle='-', linewidth=1)
-    ax1.set_ylabel("Power (kW)", fontsize=14)
-    ax1.set_title(f"BESS Discharge Control - {scenario_name}", fontsize=16, fontweight='bold')
-    ax1.legend(loc='best', fontsize=12)
+    ax1.set_ylabel("Power (kW)", fontsize=20)
+    ax1.set_title(f"BESS Discharge Control - {scenario_name}", fontsize=20, fontweight='bold')
+    ax1.legend(loc='best', fontsize=16)
     ax1.grid(True, alpha=0.3)
     
     # Bottom: BESS Voltage
@@ -300,18 +303,21 @@ def plot_bess_power_and_voltage(scenario_name=SCENARIO):
     ax2.axhline(1.06, color='black', linestyle='--', linewidth=2, label='Upper Limit')
     ax2.axhline(1.00, color='gray', linestyle=':', linewidth=2, label='Nominal')
     ax2.axhline(0.94, color='black', linestyle='--', linewidth=2, label='Lower Limit')
-    ax2.axhspan(0.85, 0.94, alpha=0.1, color='red')
-    ax2.set_ylabel("Voltage (p.u.)", fontsize=14)
-    ax2.set_xlabel("Time (Hours)", fontsize=14)
-    ax2.legend(loc='best', fontsize=12)
+    #ax2.axhspan(0.85, 0.94, alpha=0.1, color='red')
+    ax2.set_ylabel("Voltage (p.u.)", fontsize=20)
+    ax2.set_xlabel("Time (Hours)", fontsize=20)
+    ax2.legend(loc='best', fontsize=16)
     ax2.grid(True, alpha=0.3)
     ax2.set_ylim([0.85, 1.15])
     
     # Save
-    output_fig = output_dir / f"bess_power_and_voltage_{scenario_name}.png"
+    output_fig_png = output_dir / f"bess_power_and_voltage_{scenario_name}.png"
+    output_fig_pdf = output_dir / f"bess_power_and_voltage_{scenario_name}.pdf"
     plt.tight_layout()
-    plt.savefig(output_fig, dpi=150, bbox_inches='tight')
-    print(f"📊 Saved power-voltage plot to: {output_fig}")
+    plt.savefig(output_fig_png, dpi=150, bbox_inches='tight')
+    plt.savefig(output_fig_pdf, bbox_inches='tight')
+    print(f"📊 Saved power-voltage plot to: {output_fig_png}")
+    print(f"📊 Saved power-voltage plot to: {output_fig_pdf}")
     plt.show()
 
 

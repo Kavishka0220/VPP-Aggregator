@@ -370,7 +370,7 @@ class UrbanVPPEnv(gym.Env):
         if 6 <= hour < 18 and net_solar_surplus > 0:
             # During daytime with solar surplus - force home batteries to charge
             home_batt_avg_soc = np.mean([self.soc[0], self.soc[1]])
-            if home_batt_avg_soc < 0.75:
+            if home_batt_avg_soc < 0.8:
                 # Home batteries not full - share solar surplus with them
                 # Reduce BESS charge intensity to allow home batteries to charge from solar
                 total_home_batt_soc = self.soc[0] + self.soc[1]
@@ -442,9 +442,9 @@ class UrbanVPPEnv(gym.Env):
                 else:
                     # No daytime solar surplus expected - charge from grid during off-peak
                     # For solar unavailable days, MUST charge BESS fully since no daytime solar backup
-                    if bess_soc < 0.7:
-                        # Calculate how much charge is needed (target 0.75 for peak discharge)
-                        energy_deficit = (0.75 - bess_soc) * self.bess_cap  # kWh needed
+                    if bess_soc < 0.8:
+                        # Calculate how much charge is needed (target 0.8 for peak discharge)
+                        energy_deficit = (0.8 - bess_soc) * self.bess_cap  # kWh needed
                         
                         # Calculate remaining off-peak hours for charging (11pm-6am = 7 hours max)
                         if hour >= 23:
@@ -530,7 +530,7 @@ class UrbanVPPEnv(gym.Env):
                 # DAYTIME: Reduce discharge intensity if solar production is high (leads to overvoltage)
                 if total_solar > 0.8 * self.remaining_demand:  # High solar relative to demand
                     # Limit BESS discharge to avoid pushing voltage up
-                    max_bess_discharge = 0.5 * p_max  # Cap at 50% of max power
+                    max_bess_discharge = 0.2 * p_max  # Cap at 20% of max power
                     desired_power = min(desired_power, max_bess_discharge)
                     if self.verbose:
                         print(f"[LIMIT_DISCHARGE] Hour {(self.current_step % 96)/4:.1f}: Limited BESS discharge to {desired_power:.1f}kW (high solar)")
@@ -572,7 +572,7 @@ class UrbanVPPEnv(gym.Env):
                     desired_power = 0.0  # Block discharge outside peak - save for expensive hours
             
             # --- CONSTRAINT 5: Block all battery charging between 11pm-12am ---
-            if 23 <= hour < 24 and desired_power < 0:
+            if 18 <= hour < 24 and desired_power < 0:
                 desired_power = 0.0  # No charging allowed between 11pm-12am
             
             # Limit discharge to actual remaining demand
@@ -719,26 +719,25 @@ class UrbanVPPEnv(gym.Env):
             
             if net_solar_surplus > 0:
                 # Solar surplus available: reward for charging from excess solar
-                # Reduced coefficient from 50 to 25 for stability
-                daytime_solar_bonus += 25.0 * (-total_charge_power)
+                
+                daytime_solar_bonus += 30.0 * (-total_charge_power)
                 
                 # Extra incentive for BESS to absorb community solar (priority target)
                 bess_charge_power = np.minimum(0, self.node_battery_power_kw[self.bess_index])
                 surplus_factor = min(1.0, net_solar_surplus / 20.0)
-                # Reduced from 75 to 35 for stability
                 daytime_solar_bonus += 35.0 * (-bess_charge_power) * (1.0 + surplus_factor)
                 
                 # SOLAR WASTE PENALTY: Penalize exported solar when batteries have available capacity
                 # Only penalize if batteries are not nearly full
                 avg_soc = np.mean(self.soc)
-                if avg_soc < 0.75:  # Batteries have room to charge
+                if avg_soc < 0.8:  # Batteries have room to charge
                     # Calculate solar wasted (surplus not captured in batteries)
                     solar_wasted = net_solar_surplus - (-total_charge_power)
-                    if solar_wasted > 0.5:  # Only penalize meaningful waste
+                    if solar_wasted > 0.2:  # Only penalize meaningful waste
                         # Reduced from 50 to 25 LKR per kW wasted
-                        solar_waste_penalty = -25.0 * solar_wasted
+                        solar_waste_penalty = -30.0 * solar_wasted
                         if self.verbose:
-                            print(f"[SOLAR_WASTE] Hour {hour:.1f}: {solar_wasted:.2f}kW solar exported despite {(0.75-avg_soc):.2%} battery capacity available → Penalty -{25.0*solar_wasted:.0f}")
+                            print(f"[SOLAR_WASTE] Hour {hour:.1f}: {solar_wasted:.2f}kW solar exported despite {(0.8-avg_soc):.2%} battery capacity available → Penalty -{30.0*solar_wasted:.0f}")
             else:
                 # NO solar surplus - penalize BESS discharge during daytime to save for peak hours
                 bess_discharge_power = np.maximum(0, self.node_battery_power_kw[self.bess_index])
@@ -760,11 +759,12 @@ class UrbanVPPEnv(gym.Env):
         # Strategy: Discharge at HIGH prices to maximize revenue at peak demand times
         # Peak discharge value = 45 LKR sell price (much higher than daytime 19 LKR)
         peak_bonus = 0.0
+        peak_charge_penalty = 0.0  # NEW: Penalize charging during peak hours
         if 18 <= hour < 23:  # Evening peak hours (6pm-11pm)
             if np.mean(self.soc) > 0.3:  # Only discharge if battery has energy
                 total_discharge_power = np.sum(np.maximum(0, self.node_battery_power_kw))
-                # Reduced peak bonus coefficient from 45 to 25 for stability
-                peak_bonus = 25.0 * total_discharge_power
+                
+                peak_bonus = 35.0 * total_discharge_power
         
         # ----- SECTION 3: OFF-PEAK (11pm-6am) -----
         # Strategy: HOME batteries and BESS can charge at cheap rates (21 LKR)
@@ -774,7 +774,7 @@ class UrbanVPPEnv(gym.Env):
         if hour < 6:  # Off-peak hours (12am-6am only)
             # HOME BATTERY CHARGING
             home_batt_soc = [self.soc[0], self.soc[1]]  # Home batteries only
-            if np.mean(home_batt_soc) < 0.7:  # Room to charge
+            if np.mean(home_batt_soc) < 0.8:  # Room to charge
                 home_charge_power = self.node_battery_power_kw[3] + self.node_battery_power_kw[5]
                 home_charge_power = min(0, home_charge_power)  # Negative when charging
                 
@@ -796,7 +796,7 @@ class UrbanVPPEnv(gym.Env):
                         expected_surplus = expected_solar - expected_load
                         
                         home_capacity = 2 * self.home_batt_cap
-                        energy_needed = home_capacity * (0.75 - np.mean(home_batt_soc))
+                        energy_needed = home_capacity * (0.8 - np.mean(home_batt_soc))
                         
                         # If solar can provide 90%+ of needed energy, don't use grid
                         if expected_surplus > energy_needed * 0.9:
@@ -805,10 +805,10 @@ class UrbanVPPEnv(gym.Env):
                 # Decision based on solar forecast (only for home batteries)
                 if solar_will_be_sufficient:
                     # PENALTY: Don't charge from grid, save capacity for solar
-                    offpeak_bonus = 4.0 * home_charge_power  # Reduced from 8 to 4
+                    offpeak_bonus = 4.0 * home_charge_power  
                 else:
                     # REWARD: Charge at cheap off-peak rates (solar won't be enough)
-                    offpeak_bonus = -8.0 * home_charge_power  # Reduced from -15 to -8
+                    offpeak_bonus = -8.0 * home_charge_power  
             
             # BESS OFF-PEAK CHARGING - Predictive Strategy
             # Reward BESS for intelligently pre-charging based on daytime solar forecast
@@ -940,7 +940,7 @@ class UrbanVPPEnv(gym.Env):
         
         # Reward normalization and clipping for stability
         # Divide by higher value and clip to [-10, 10] range for stable learning
-        reward = reward / 10.0  # Normalized divisor for better gradient scaling
+        reward = reward / 5.0  # Normalized divisor for better gradient scaling
         #reward = np.clip(reward, -20.0, 20.0)  # Allow wider range for better signal
         
         # Debug output for reward analysis (only when verbose)

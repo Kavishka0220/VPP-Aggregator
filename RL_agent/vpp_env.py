@@ -763,8 +763,18 @@ class UrbanVPPEnv(gym.Env):
         if 18 <= hour < 23:  # Evening peak hours (6pm-11pm)
             if np.mean(self.soc) > 0.3:  # Only discharge if battery has energy
                 total_discharge_power = np.sum(np.maximum(0, self.node_battery_power_kw))
-                
                 peak_bonus = 35.0 * total_discharge_power
+            
+            # Penalize charging at peak hours (50 LKR per kW instead of 150)
+            for i, node_idx in enumerate(self.storage_map):
+                charge_power = np.minimum(0, self.node_battery_power_kw[i])  # Negative when charging
+                if charge_power < 0:  # Battery is charging during peak hours
+                    is_bess = (node_idx == self.bess_index)
+                    # Reduced penalty: 50 LKR per kW charged at peak (still strong but not excessive)
+                    peak_charge_penalty -= 50.0 * (-charge_power)
+                    if self.verbose:
+                        batt_name = "BESS" if is_bess else f"Home(Node{node_idx})"
+                        print(f"[PEAK_CHARGE_PENALTY] {batt_name}: -{(-charge_power):.2f}kW at {hour:.1f}h → Penalty {-50.0*(-charge_power):.0f}")
         
         # ----- SECTION 3: OFF-PEAK (11pm-6am) -----
         # Strategy: HOME batteries and BESS can charge at cheap rates (21 LKR)

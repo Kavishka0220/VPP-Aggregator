@@ -233,9 +233,9 @@ def plot_comparison(scenario_name=SCENARIO):
     fig, ax = plt.subplots(figsize=(14, 6))
     
     # Plot BESS voltages
-    ax.plot(hours, df_baseline["NBESS"], linewidth=2.5, label="NBESS - Baseline (No BESS)", 
+    ax.plot(hours, df_baseline["NBESS"], linewidth=2.5, label="Without BESS", 
             color='#CC5500', linestyle='-', alpha=0.7)
-    ax.plot(hours, df_controlled["NBESS"], linewidth=2.5, label="NBESS - Controlled (With BESS)", 
+    ax.plot(hours, df_controlled["NBESS"], linewidth=2.5, label="With BESS - Controlled", 
             color='#0055CC', linestyle='-', alpha=0.7)
     
     # Add limit lines
@@ -248,9 +248,9 @@ def plot_comparison(scenario_name=SCENARIO):
     #ax.axhspan(1.06, 1.15, alpha=0.1, color='orange', label='Overvoltage zone')
     
     # Formatting
-    ax.set_xlabel("Time (Hours)", fontsize=20)
-    ax.set_ylabel("Voltage (p.u.)", fontsize=20)
-    ax.set_title(f"BESS Voltage Control Impact - {scenario_name}", fontsize=22, fontweight='bold')
+    ax.set_xlabel("Time (Hours)", fontsize=22)
+    ax.set_ylabel("Voltage (p.u.)", fontsize=22)
+    ax.set_title(f"BESS Voltage Control Impact - {scenario_name}", fontsize=25, fontweight='bold')
     ax.legend(loc='best',fontsize=18)
     ax.grid(True, alpha=0.3)
     ax.set_ylim([0.85, 1.15])
@@ -260,7 +260,7 @@ def plot_comparison(scenario_name=SCENARIO):
     output_fig_png = output_dir / f"voltage_control_comparison_{scenario_name}.png"
     output_fig_pdf = output_dir / f"voltage_control_comparison_{scenario_name}.pdf"
     plt.tight_layout()
-    plt.savefig(output_fig_png, dpi=150, bbox_inches='tight')
+    plt.savefig(output_fig_png, dpi=300, bbox_inches='tight')
     plt.savefig(output_fig_pdf, bbox_inches='tight')
     print(f"📊 Saved comparison plot to: {output_fig_png}")
     print(f"📊 Saved comparison plot to: {output_fig_pdf}")
@@ -314,8 +314,8 @@ def plot_bess_power_and_voltage(scenario_name=SCENARIO):
     output_fig_png = output_dir / f"bess_power_and_voltage_{scenario_name}.png"
     output_fig_pdf = output_dir / f"bess_power_and_voltage_{scenario_name}.pdf"
     plt.tight_layout()
-    plt.savefig(output_fig_png, dpi=150, bbox_inches='tight')
-    plt.savefig(output_fig_pdf, bbox_inches='tight')
+    plt.savefig(output_fig_png, dpi=300, bbox_inches='tight')
+    plt.savefig(output_fig_pdf, dpi=300, bbox_inches='tight')
     print(f"📊 Saved power-voltage plot to: {output_fig_png}")
     print(f"📊 Saved power-voltage plot to: {output_fig_pdf}")
     plt.show()

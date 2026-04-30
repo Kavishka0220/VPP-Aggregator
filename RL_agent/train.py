@@ -129,7 +129,7 @@ def main():
         n_epochs=10,                # More epochs for better convergence
         n_steps=2048,               # Steps per environment before update
         batch_size=128,             # Larger batch size for stability
-        ent_coef=0.001,             # Lower exploration for smoother convergence
+        ent_coef=0.01,             # Lower exploration for smoother convergence
         vf_coef=0.5,                # Value function coefficient
         max_grad_norm=1.0,          # Increased gradient clipping threshold
         policy_kwargs=policy_kwargs,

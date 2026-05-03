@@ -122,18 +122,18 @@ def main():
         env, 
         verbose=1,
         learning_rate=linear_schedule(3e-4),  # Reduced initial LR for stability
-        gamma=0.995,                 # Balanced discount factor
+        gamma=0.99,                 # Balanced discount factor
         gae_lambda=0.95,            # Stronger GAE smoothing for stability
         clip_range=0.2,             # Increased clip range to reduce instability
         clip_range_vf=0.2,          # Value function clipping
         n_epochs=10,                # More epochs for better convergence
         n_steps=2048,               # Steps per environment before update
         batch_size=64,             # Larger batch size for stability
-        ent_coef=0.005,             # Lower exploration for smoother convergence
+        ent_coef=0.01,             # Lower exploration for smoother convergence
         vf_coef=0.5,                # Value function coefficient
-        max_grad_norm=1.0,          # Increased gradient clipping threshold
+        max_grad_norm=0.5,          # Increased gradient clipping threshold
         policy_kwargs=policy_kwargs,
-        target_kl=0.1,              # Early stopping threshold for stability
+        target_kl=0.05,              # Early stopping threshold for stability
         seed=42,
         tensorboard_log=tensorboard_dir
     )
@@ -165,7 +165,7 @@ def main():
     callbacks = CallbackList([checkpoint_callback, eval_callback])
     
     # 4. Start Training
-    total_timesteps = 10_000_000  # Updated to 1M steps for stable convergence
+    total_timesteps = 1000_000  # Updated to 1M steps for stable convergence
     print("[START] PPO Training...")
     print(f"   Target: {total_timesteps:,} Timesteps")
     print(f"   Checkpoints every: {checkpoint_callback.save_freq:,} steps")

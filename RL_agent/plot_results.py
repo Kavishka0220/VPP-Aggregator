@@ -577,4 +577,4 @@ print("All plots saved successfully!")
 print(f"Output directory: {SCENARIO_FOLDER}/")
 print("="*50)
 
-plt.show()
+#plt.show()

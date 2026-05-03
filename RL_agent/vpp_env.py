@@ -897,7 +897,7 @@ class UrbanVPPEnv(gym.Env):
         soft_violations = np.minimum(0.03, over_voltage + under_voltage)
         hard_violations = np.maximum(0, (over_voltage + under_voltage) - 0.03)
         
-        voltage_penalty = -50.0 * np.sum(soft_violations) - 500.0 * np.sum(hard_violations)
+        voltage_penalty = -50.0 * np.sum(soft_violations) - 1000.0 * np.sum(hard_violations)
         
         # IMPROVED: VOLTAGE STABILITY BONUS - Reward nodes in safe bands
         # Generous bonus for nodes in ideal range to guide agent
@@ -950,7 +950,7 @@ class UrbanVPPEnv(gym.Env):
         
         # Reward normalization and clipping for stability
         # Divide by higher value and clip to [-10, 10] range for stable learning
-        reward = reward / 5.0  # Normalized divisor for better gradient scaling
+        #reward = reward / 5.0  # Normalized divisor for better gradient scaling
         #reward = np.clip(reward, -20.0, 20.0)  # Allow wider range for better signal
         
         # Debug output for reward analysis (only when verbose)

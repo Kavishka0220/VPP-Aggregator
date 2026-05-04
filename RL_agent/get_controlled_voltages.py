@@ -102,13 +102,19 @@ def get_controlled_voltages(scenario_name=SCENARIO, num_steps=96):
             break
         
         # Extract loads (21 values, kW)
-        loads = load_data.iloc[step, :21].values.astype(float)
+        # Handle both formats: some files have Timestamp column (22 cols), others don't (21 cols)
+        if load_data.shape[1] == 22:
+            loads = load_data.iloc[step, 1:22].values.astype(float)
+        else:
+            loads = load_data.iloc[step, :21].values.astype(float)
         
         # Extract solar (11 nodes with PV)
+        # Similar handling for solar data format
         solar_indices = [3, 5, 7, 10, 11, 13, 15, 17, 18, 19, 20]
         pv_dict = {}
+        solar_col_offset = 1 if solar_data.shape[1] == 22 else 0
         for pv_idx in solar_indices:
-            col_idx = pv_idx
+            col_idx = pv_idx + solar_col_offset
             if col_idx < len(solar_data.columns):
                 pv_dict[pv_idx] = solar_data.iloc[step, col_idx]
         
@@ -250,7 +256,8 @@ def plot_comparison(scenario_name=SCENARIO):
     # Formatting
     ax.set_xlabel("Time (Hours)", fontsize=22)
     ax.set_ylabel("Voltage (p.u.)", fontsize=22)
-    ax.set_title(f"BESS Voltage Control Impact - {scenario_name}", fontsize=25, fontweight='bold')
+    #ax.set_title(f"BESS Voltage Control Impact - {scenario_name}", fontsize=25, fontweight='bold')
+    ax.set_title(f"BESS Voltage Control Impact", fontsize=25, fontweight='bold')
     ax.legend(loc='best',fontsize=18)
     ax.grid(True, alpha=0.3)
     ax.set_ylim([0.85, 1.15])

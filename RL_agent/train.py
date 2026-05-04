@@ -42,7 +42,6 @@ def main():
     scenario_name = "night_peak"  # Change to any scenario above
 
 
-    
     # Get script directory to ensure outputs save in RL_agent folder
     script_dir = os.path.dirname(os.path.abspath(__file__))
     checkpoint_dir = os.path.join(script_dir, "checkpoints")
@@ -165,7 +164,7 @@ def main():
     callbacks = CallbackList([checkpoint_callback, eval_callback])
     
     # 4. Start Training
-    total_timesteps = 1000_000  # Updated to 1M steps for stable convergence
+    total_timesteps = 1000_000  # Updated to 500k steps for stable convergence
     print("[START] PPO Training...")
     print(f"   Target: {total_timesteps:,} Timesteps")
     print(f"   Checkpoints every: {checkpoint_callback.save_freq:,} steps")

@@ -96,13 +96,19 @@ def get_baseline_voltages(scenario_name=SCENARIO, start_idx=START_INDEX, num_ste
             break
         
         # Extract loads (21 values, kW)
-        loads = load_data.iloc[actual_idx, :21].values.astype(float)
+        # Handle both formats: some files have Timestamp column (22 cols), others don't (21 cols)
+        if load_data.shape[1] == 22:
+            loads = load_data.iloc[actual_idx, 1:22].values.astype(float)
+        else:
+            loads = load_data.iloc[actual_idx, :21].values.astype(float)
         
         # Extract solar (11 nodes with PV)
+        # Similar handling for solar data format
         solar_indices = [3, 5, 7, 10, 11, 13, 15, 17, 18, 19, 20]
         pv_dict = {}
+        solar_col_offset = 1 if solar_data.shape[1] == 22 else 0
         for pv_idx in solar_indices:
-            col_idx = pv_idx
+            col_idx = pv_idx + solar_col_offset
             if col_idx < len(solar_data.columns):
                 pv_dict[pv_idx] = solar_data.iloc[actual_idx, col_idx]
         

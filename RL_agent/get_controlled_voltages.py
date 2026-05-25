@@ -28,7 +28,7 @@ from openDSS.run_opendss import VPPDSSRunner
 # ============================================================================
 # ⚙️  CONFIGURATION - Change scenario here
 # ============================================================================
-SCENARIO = "intermittent_solar"  # Options: "night_peak", "daytime_peak", "solar_unavailable_day", "low_load_weekend"
+SCENARIO = "solar_unavailable_day"  # Options: "night_peak", "daytime_peak", "solar_unavailable_day", "low_load_weekend"
 # ============================================================================
 
 

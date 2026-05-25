@@ -82,8 +82,6 @@ class UrbanVPPEnv(gym.Env):
         # --- 3. OBSERVATION SPACE ---
         # 1(Solar) + 21(Loads) + 22(Voltages) + 3(SoCs) + 4(Time) = 51
         # All values are normalised in _get_obs() so they fit inside [-1, 1].
-        # Using [-2, 2] as bounds gives headroom for unseen extreme values
-        # without triggering the SB3 env-checker assertion error.
         self.obs_size = 51
 
         # Normalisation constants (per observation group)

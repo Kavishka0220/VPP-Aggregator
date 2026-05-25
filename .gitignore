@@ -202,6 +202,8 @@ cython_debug/
 # Specific files to ignore
 RL_agent/setup_scripts/solar_data_process.py
 RL_agent/setup_scripts/process_data.py
+RL_agent/economics_benefits.py
+RL_agent/get_baseline_voltages.py
 
 # ===== VPP-AGGREGATOR SPECIFIC FILES =====
 solar_load.png

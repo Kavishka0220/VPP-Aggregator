@@ -271,7 +271,7 @@ results_plots/**/*_bess_*.png
 results_plots/**/*_rewards.png
 results_plots/**/thesis_result_plot.png
 results_plots/**/training_*.png
-results_plots/**/scenario_analysis/
+
 results_plots/**/baseline_voltages_*.png
 results_plots/**/baseline_voltages_*.csv
 results_plots/**/bess_power_*.png

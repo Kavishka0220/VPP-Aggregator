@@ -269,9 +269,6 @@ results_plots/**/*_5_home_batteries.png
 results_plots/**/*_voltage_profiles.png
 results_plots/**/*_bess_*.png
 results_plots/**/*_rewards.png
-results_plots/**/*_voltages_*.csv
-results_plots/**/*_voltage_*.csv
-results_plots/**/*_voltages_*.png
 results_plots/**/thesis_result_plot.png
 results_plots/**/training_*.png
 results_plots/**/scenario_analysis/
@@ -279,10 +276,12 @@ results_plots/**/baseline_voltages_*.png
 results_plots/**/baseline_voltages_*.csv
 results_plots/**/bess_power_*.png
 results_plots/**/bess_power_*.csv
-# Keep these files
-!results_plots/**/1_power_exchange_detailed.png
-!results_plots/**/voltage_control_comparison_*.png
-!results_plots/**/detailed_simulation_results.csv
+results_plots/**/controlled_voltages_*.csv
+results_plots/**/voltage_comparison_*.png
+results_plots/**/voltage_comparison_*.pdf
+
+battery_cycling_latex.tex
+cycling_penalty_benchmarks.tex
 
 battery_cycling_latex.tex
 cycling_penalty_benchmarks.tex

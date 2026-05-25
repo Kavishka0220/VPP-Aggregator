@@ -199,6 +199,10 @@ cython_debug/
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
 #  refer to https://docs.cursor.com/context/ignore-files
 
+# Specific files to ignore
+RL_agent/setup_scripts/solar_data_process.py
+RL_agent/setup_scripts/process_data.py
+
 # ===== VPP-AGGREGATOR SPECIFIC FILES =====
 solar_load.png
 solar_voltages.png

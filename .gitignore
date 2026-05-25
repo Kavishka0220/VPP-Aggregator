@@ -224,7 +224,6 @@ eval_logs/
 training_logs/
 
 # Generated output files
-results_plots/
 data_output/
 no_battery/
 
@@ -264,13 +263,26 @@ eval_logs/evaluations.npz
 *.npz
 *.npz
 /RL_agent/old_test_scripts
-results_plots/night_peak/3_rewards.png
-results_plots/night_peak/3_rewards.png
-results_plots/night_peak/3_rewards.png
-results_plots/night_peak/3_rewards.png
-results_plots/night_peak/detailed_simulation_results.csv
-results_plots/training_comparison.png
-results_plots/daytime_peak/3_rewards.png
+# results_plots: Hide large/temporary files, keep only essential ones
+results_plots/**/*.pdf
+results_plots/**/*_5_home_batteries.png
+results_plots/**/*_voltage_profiles.png
+results_plots/**/*_bess_*.png
+results_plots/**/*_rewards.png
+results_plots/**/*_voltages_*.csv
+results_plots/**/*_voltage_*.csv
+results_plots/**/*_voltages_*.png
+results_plots/**/thesis_result_plot.png
+results_plots/**/training_*.png
+results_plots/**/scenario_analysis/
+results_plots/**/baseline_voltages_*.png
+results_plots/**/baseline_voltages_*.csv
+results_plots/**/bess_power_*.png
+results_plots/**/bess_power_*.csv
+# Keep these files
+!results_plots/**/1_power_exchange_detailed.png
+!results_plots/**/voltage_control_comparison_*.png
+!results_plots/**/detailed_simulation_results.csv
+
 battery_cycling_latex.tex
-results_plots/night_peak/3_rewards.png
 cycling_penalty_benchmarks.tex

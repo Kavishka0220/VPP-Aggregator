@@ -32,9 +32,70 @@ class UrbanVPPEnv(gym.Env):
     V2. Time-aware ramp rates          → tighter ramp during off-peak charging (5 kW/step)
                                          vs peak discharge (10 kW/step)
     V3. Severe violation penalty tier  → −500 per p.u. beyond 0.06 violation (quadratic signal)
+
+    CODE QUALITY IMPROVEMENTS:
+    - Extracted reward constants to class-level attributes for easy tuning
+    - Extracted data loading to _load_data()
+    - Broke step() into sub-methods for readability
+    - Fixed peak charge penalty indexing bug (was reading wrong nodes)
+    - Added OpenDSS convergence check
+    - Normalised SoC in observation space to [-1, +1]
+    - Added terminal SoC reward for end-of-day battery health
     """
 
     metadata = {'render_modes': []}
+
+    # ==================== REWARD TUNING CONSTANTS ====================
+    # All reward weights in one place for easy experimentation.
+    # Naming convention: R_ prefix for reward constants.
+
+    # Economic
+    R_ECONOMIC_WEIGHT        = 0.6
+
+    # Daytime solar
+    R_SOLAR_CHARGE_BONUS     = 30.0   # per kW of solar charging
+    R_BESS_SOLAR_CHARGE      = 35.0   # per kW of BESS solar charging
+    R_SOLAR_WASTE_PENALTY    = -30.0  # per kW of wasted solar
+    R_BESS_DAYTIME_DISCHARGE = -25.0  # per kW of inappropriate daytime discharge
+    R_HOME_SOLAR_CHARGE      = 20.0   # per kW of home battery solar charging
+
+    # Peak hours
+    R_PEAK_DISCHARGE_BONUS   = 35.0   # per kW of peak discharge
+    R_CLEAN_PEAK_BONUS       = 50.0   # per kW of clean (no-violation) peak discharge
+    R_PEAK_CHARGE_PENALTY    = -50.0  # per kW of charging during peak
+
+    # Off-peak
+    R_HOME_OFFPEAK_SOLAR_OK  = 4.0    # home charging penalty when solar will suffice
+    R_HOME_OFFPEAK_NEEDED    = -8.0   # home charging bonus when solar won't suffice
+
+    # Voltage
+    R_VOLT_SOFT_PER_PU       = -25.0   # 0 to 0.03 p.u. violation
+    R_VOLT_HARD_PER_PU       = -100.0  # 0.03 to 0.06 p.u. violation
+    R_VOLT_SEVERE_PER_PU     = -500.0  # beyond 0.06 p.u. violation
+    R_IDEAL_NODE_BONUS       = 20.0    # per node in [0.98, 1.02]
+    R_ACCEPTABLE_NODE_BONUS  = 5.0     # per node in [0.94, 1.06] but not ideal
+
+    # Battery health
+    R_CYCLING_LINEAR         = -0.3
+    R_CYCLING_QUADRATIC      = -0.1
+    R_SOC_HEALTH_PENALTY     = -50.0
+
+    # Grid smoothing
+    R_RAMP_THRESHOLD         = 5.0    # kW change before penalty kicks in
+    R_RAMP_PENALTY_RATE      = -0.1   # per kW above threshold
+
+    # Terminal
+    R_TERMINAL_SOC_PENALTY   = -2.0   # per unit SoC deviation from 0.5
+
+    # Normalisation
+    R_NORMALIZER             = 200.0
+    R_CLIP_LOW               = -10.0
+    R_CLIP_HIGH              = 10.0
+
+    # Convergence failure
+    R_CONVERGENCE_PENALTY    = -5.0   # heavy normalised penalty for non-convergence
+
+    # =================================================================
 
     def __init__(self, data_path="./data", scenario_name=None, start_index=None, verbose=False):
         super(UrbanVPPEnv, self).__init__()
@@ -60,6 +121,9 @@ class UrbanVPPEnv(gym.Env):
         self.bess_index = 21
         self.storage_map = self.home_batt_indices + [self.bess_index]
         self.n_storage_units = len(self.storage_map)
+
+        # Critical nodes for voltage checking (all houses + BESS)
+        self.critical_nodes = list(range(21)) + [self.bess_index]
 
         # Specs
         self.home_batt_cap  = 13.5   # kWh
@@ -89,6 +153,8 @@ class UrbanVPPEnv(gym.Env):
         self.OBS_LOAD_MAX   = 10.0   # kW  – max per-node load
         self.OBS_VOLT_NOM   = 1.0    # p.u. nominal  (centred, then divided by range)
         self.OBS_VOLT_RANGE = 0.15   # p.u. half-range (0.85-1.15 maps to -1..+1)
+        self.OBS_SOC_CENTER = 0.5    # SoC midpoint
+        self.OBS_SOC_RANGE  = 0.3    # SoC half-range (0.2–0.8 maps to -1..+1)
 
         self.observation_space = spaces.Box(
             low=-2.0, high=2.0, shape=(self.obs_size,), dtype=np.float32
@@ -98,14 +164,19 @@ class UrbanVPPEnv(gym.Env):
         self.state = None
         self.current_step = 0
         self.max_steps = 96
-        self.soc = np.ones(self.n_storage_units) * 0.5
-        self.prev_batt_power = np.zeros(self.n_storage_units)
+        self.soc = np.ones(self.n_storage_units, dtype=np.float32) * 0.5
+        self.prev_batt_power = np.zeros(self.n_storage_units, dtype=np.float32)
         self.prev_grid_net_power = 0.0
         self.voltages     = np.ones(self.n_nodes, dtype=np.float32)
         self.voltages_min = np.ones(self.n_nodes, dtype=np.float32)
         self.voltages_max = np.ones(self.n_nodes, dtype=np.float32)
 
         # --- LOAD DATA ---
+        self._load_data(data_path, scenario_name)
+
+    # ------------------------------------------------------------------
+    def _load_data(self, data_path, scenario_name):
+        """Load and validate solar/load CSV data."""
         try:
             if scenario_name:
                 scenario_folder = os.path.join(data_path, "forecast_scenarios")
@@ -177,16 +248,16 @@ class UrbanVPPEnv(gym.Env):
         except FileNotFoundError as e:
             print(f"[WARNING] File loading error: {e}")
             print("[WARNING] Using dummy random data.")
-            self.solar_df = pd.DataFrame(np.random.rand(1000, 21) * 5.0)
-            self.load_df  = pd.DataFrame(np.random.rand(1000, 21) * 3.0)
+            self.solar_df = pd.DataFrame(np.random.rand(1000, 21).astype(np.float32) * 5.0)
+            self.load_df  = pd.DataFrame(np.random.rand(1000, 21).astype(np.float32) * 3.0)
 
     # ------------------------------------------------------------------
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
         self.current_step = 0
-        self.soc = np.full(3, 0.2)
-        self.prev_batt_power    = np.zeros(self.n_storage_units)
+        self.soc = np.full(3, 0.2, dtype=np.float32)
+        self.prev_batt_power    = np.zeros(self.n_storage_units, dtype=np.float32)
         self.prev_grid_net_power = 0.0
         self.voltages     = np.ones(self.n_nodes, dtype=np.float32)
         self.voltages_min = np.ones(self.n_nodes, dtype=np.float32)
@@ -202,10 +273,10 @@ class UrbanVPPEnv(gym.Env):
             max_start = len(self.solar_df) - self.max_steps
             self.start_idx = np.random.randint(0, max_start) if max_start > 0 else 0
 
-        self.solar_episode = self.solar_df.iloc[self.start_idx:self.start_idx + self.max_steps].values
-        self.load_episode  = self.load_df.iloc[self.start_idx:self.start_idx + self.max_steps].values
+        self.solar_episode = self.solar_df.iloc[self.start_idx:self.start_idx + self.max_steps].values.astype(np.float32)
+        self.load_episode  = self.load_df.iloc[self.start_idx:self.start_idx + self.max_steps].values.astype(np.float32)
 
-        self.solar_mask = np.zeros(21)
+        self.solar_mask = np.zeros(21, dtype=np.float32)
         self.solar_mask[self.solar_indices] = 1.0
         self.solar_episode = self.solar_episode * self.solar_mask
 
@@ -254,36 +325,23 @@ class UrbanVPPEnv(gym.Env):
         return high
 
     # ------------------------------------------------------------------
-    def step(self, action):
+    # STEP SUB-METHODS
+    # ------------------------------------------------------------------
 
-        # --- 1. GET DATA ---
-        full_solar_profile = np.zeros(self.n_nodes)
-        full_load_profile  = np.zeros(self.n_nodes)
-        full_solar_profile[:21] = self.solar_episode[self.current_step]
-        full_load_profile[:21]  = self.load_episode[self.current_step]
+    def _apply_soft_guidance(self, action, hour, net_solar_surplus, net_demand,
+                             bess_soc, peak_import_target):
+        """
+        Apply soft action guidance to steer the RL agent toward sensible
+        behaviour without hard-blocking.  Returns modified action array.
 
-        total_load  = np.sum(full_load_profile)
-        total_solar = np.sum(full_solar_profile)
-        hour = (self.current_step % 96) / 4.0
-
-        net_demand        = max(0.0, total_load - total_solar)
-        net_solar_surplus = total_solar - total_load
-        self.remaining_demand    = net_demand
-        remaining_solar_surplus  = max(0.0, net_solar_surplus)
-        peak_import_target       = self._compute_peak_import_target(hour)
-
-        # ==================================================================
-        # FIX 1 – SOFTENED ACTION OVERRIDES
-        # Instead of hard-blocking the RL agent (desired_power = 0.0),
-        # we now use "soft guidance": steer the action toward what the
-        # rules want but still let the agent deviate by a small margin.
-        # Hard blocks are kept ONLY for true physical constraints
-        # (SoC limits, ramp rates, voltage safety).
-        # This gives the RL agent a higher performance ceiling.
-        # ==================================================================
+        Instead of hard-blocking the RL agent (desired_power = 0.0),
+        we use "soft guidance": steer the action toward what the
+        rules want but still let the agent deviate by a small margin.
+        Hard blocks are kept ONLY for true physical constraints
+        (SoC limits, ramp rates, voltage safety).
+        """
         action_modified = action.copy()
         bess_action_idx = 2
-        bess_soc = self.soc[bess_action_idx]
 
         # --- BESS: solar-surplus charging guidance (soft) ---
         if net_solar_surplus > 0 and bess_soc < 0.8:
@@ -367,9 +425,19 @@ class UrbanVPPEnv(gym.Env):
                 elif bess_soc < 0.6:
                     action_modified[bess_action_idx] = np.clip(action[bess_action_idx], -0.7, 0.0)
 
-        # --- 2. PHYSICS: APPLY ACTIONS ---
-        self.node_battery_power_kw = np.zeros(self.n_nodes)
+        return action_modified
+
+    # ------------------------------------------------------------------
+    def _apply_physics_constraints(self, action_modified, hour, net_solar_surplus,
+                                    remaining_solar_surplus, total_solar, total_load):
+        """
+        Apply hard physical constraints (SoC, ramp, voltage safety) and
+        update battery SoC.  Returns (remaining_demand, remaining_solar_surplus,
+        prev_batt_power_copy).
+        """
+        self.node_battery_power_kw = np.zeros(self.n_nodes, dtype=np.float32)
         prev_batt_power_copy = self.prev_batt_power.copy()
+        remaining_demand = max(0.0, total_load - total_solar)
 
         for i, node_idx in enumerate(self.storage_map):
 
@@ -394,8 +462,12 @@ class UrbanVPPEnv(gym.Env):
             if self.soc[i] >= 0.8 and desired_power < 0:
                 desired_power = 0.0
 
-            # CONSTRAINT 2: Block ALL charging 11pm–midnight (transition hour)
-            if 23 <= hour and desired_power < 0:
+            # CONSTRAINT 2: Block ALL BESS activity 11pm–midnight (transition hour)
+            # BESS must be idle during this period — no charging or discharging
+            if is_bess and 23 <= hour:
+                desired_power = 0.0
+            # Home batteries: still block charging only
+            elif not is_bess and 23 <= hour and desired_power < 0:
                 desired_power = 0.0
 
             # CONSTRAINT 3: Block ALL charging during peak (6pm–11pm)
@@ -417,7 +489,7 @@ class UrbanVPPEnv(gym.Env):
 
             # CONSTRAINT 6: Voltage-safety discharge limit for BESS
             if is_bess and desired_power > 0:
-                if total_solar > 0.8 * self.remaining_demand:
+                if total_solar > 0.8 * remaining_demand:
                     desired_power = min(desired_power, 0.2 * p_max)
 
             # CONSTRAINT 7: Cap combined solar+battery injection to avoid overvoltage
@@ -453,8 +525,8 @@ class UrbanVPPEnv(gym.Env):
 
             # Limit discharge to remaining demand
             if desired_power > 0:
-                desired_power = min(desired_power, self.remaining_demand)
-                self.remaining_demand -= desired_power
+                desired_power = min(desired_power, remaining_demand)
+                remaining_demand -= desired_power
 
             # -- Ramp rate --
             delta_p     = np.clip(desired_power - self.prev_batt_power[i], -ramp, ramp)
@@ -505,20 +577,37 @@ class UrbanVPPEnv(gym.Env):
             self.node_battery_power_kw[node_idx] = final_power
             self.prev_batt_power[i] = final_power
 
-        # --- 3. OpenDSS PHYSICS ---
+        return remaining_demand, remaining_solar_surplus, prev_batt_power_copy
+
+    # ------------------------------------------------------------------
+    def _run_opendss(self, full_solar_profile, full_load_profile):
+        """Run OpenDSS power flow and update voltage arrays.
+
+        Returns True if converged, False otherwise.
+        """
         self.net_injection = full_solar_profile + self.node_battery_power_kw - full_load_profile
 
         loads_kw = full_load_profile[:21].tolist()
-        pv_kw    = {idx: full_solar_profile[idx] for idx in self.solar_indices}
+        pv_kw    = {idx: float(full_solar_profile[idx]) for idx in self.solar_indices}
 
         step_res = self.dss_runner.step(
             loads_kw=loads_kw,
             pv_kw=pv_kw,
-            batt_home3_kw=self.node_battery_power_kw[3],
-            batt_home5_kw=self.node_battery_power_kw[5],
-            bess_kw=self.node_battery_power_kw[21],
+            batt_home3_kw=float(self.node_battery_power_kw[3]),
+            batt_home5_kw=float(self.node_battery_power_kw[5]),
+            bess_kw=float(self.node_battery_power_kw[21]),
             auto_compile=False
         )
+
+        # FIX 1.4: Check convergence — garbage voltages corrupt reward signals
+        if not step_res.converged:
+            if self.verbose:
+                print(f"[WARNING] OpenDSS did not converge at step {self.current_step}")
+            # Use safe fallback voltages (nominal)
+            self.voltages     = np.ones(self.n_nodes, dtype=np.float32)
+            self.voltages_min = np.ones(self.n_nodes, dtype=np.float32)
+            self.voltages_max = np.ones(self.n_nodes, dtype=np.float32)
+            return False
 
         self.voltages     = np.array(step_res.vmin_pu_by_bus, dtype=np.float32)
         self.voltages_min = self.voltages.copy()
@@ -528,9 +617,31 @@ class UrbanVPPEnv(gym.Env):
             phases = [v for v in [va, vb, vc] if not np.isnan(v)]
             self.voltages_max[i] = max(phases) if phases else 1.0
 
-        # ==================================================================
-        # --- 4. REWARD CALCULATION ---
-        # ==================================================================
+        return True
+
+    # ------------------------------------------------------------------
+    def _compute_reward(self, hour, net_demand, net_solar_surplus, total_solar,
+                        total_load, prev_batt_power_copy, peak_import_target,
+                        converged, remaining_demand):
+        """Compute the shaped reward signal.
+
+        Returns (reward, reward_info_dict).
+        """
+        # --- Non-convergence short-circuit ---
+        if not converged:
+            return self.R_CONVERGENCE_PENALTY, {
+                "revenue": 0.0, "cost": 0.0, "profit": 0.0,
+                "grid_export_revenue": 0.0, "grid_import_cost": 0.0,
+                "bess_discharge_revenue": 0.0, "bess_charge_cost": 0.0,
+                "voltage_penalty": self.R_CONVERGENCE_PENALTY * self.R_NORMALIZER,
+                "clean_peak_bonus": 0.0,
+                "grid_smoothing_penalty": 0.0,
+                "grid_power_change": 0.0,
+                "current_grid_net": 0.0,
+                "peak_import_target": peak_import_target,
+                "total_violation": 0.0,
+                "remaining_demand": remaining_demand,
+            }
 
         # Time-of-use pricing (LKR)
         if 6 <= hour < 18:
@@ -563,53 +674,49 @@ class UrbanVPPEnv(gym.Env):
             total_discharge_power = np.sum(np.maximum(0, self.node_battery_power_kw))
 
             if net_solar_surplus > 0:
-                daytime_solar_bonus += 30.0 * (-total_charge_power)
+                daytime_solar_bonus += self.R_SOLAR_CHARGE_BONUS * (-total_charge_power)
                 bess_charge_power = np.minimum(0, self.node_battery_power_kw[self.bess_index])
                 surplus_factor = min(1.0, net_solar_surplus / 20.0)
-                daytime_solar_bonus += 35.0 * (-bess_charge_power) * (1.0 + surplus_factor)
+                daytime_solar_bonus += self.R_BESS_SOLAR_CHARGE * (-bess_charge_power) * (1.0 + surplus_factor)
 
                 avg_soc = np.mean(self.soc)
                 if avg_soc < 0.8:
                     solar_wasted = net_solar_surplus - (-total_charge_power)
                     if solar_wasted > 0.2:
-                        solar_waste_penalty = -30.0 * solar_wasted
+                        solar_waste_penalty = self.R_SOLAR_WASTE_PENALTY * solar_wasted
             else:
                 bess_discharge_power = np.maximum(0, self.node_battery_power_kw[self.bess_index])
-                daytime_solar_bonus -= 25.0 * bess_discharge_power
+                daytime_solar_bonus += self.R_BESS_DAYTIME_DISCHARGE * bess_discharge_power
 
             home_batt_solar_charge = np.sum([np.minimum(0, self.node_battery_power_kw[idx])
                                              for idx in self.home_batt_indices])
             if home_batt_solar_charge < 0 and net_solar_surplus > 0:
-                daytime_solar_bonus += 20.0 * (-home_batt_solar_charge)
+                daytime_solar_bonus += self.R_HOME_SOLAR_CHARGE * (-home_batt_solar_charge)
 
         # ---- B. Peak bonuses ----
         peak_bonus         = 0.0
         peak_charge_penalty = 0.0
-        clean_peak_bonus   = 0.0   # NEW: reward clean peak discharge
+        clean_peak_bonus   = 0.0
 
         if 18 <= hour < 23:
             if np.mean(self.soc) > 0.3:
                 total_discharge_power = np.sum(np.maximum(0, self.node_battery_power_kw))
-                peak_bonus = 35.0 * total_discharge_power
+                peak_bonus = self.R_PEAK_DISCHARGE_BONUS * total_discharge_power
 
+            # FIX 1.2: Use node_idx (not i) to read battery power at correct nodes.
+            # Previously used self.node_battery_power_kw[i] which read nodes 0,1,2
+            # instead of the actual battery nodes 3,5,21.
             for i, node_idx in enumerate(self.storage_map):
-                charge_power = np.minimum(0, self.node_battery_power_kw[i])
+                charge_power = np.minimum(0, self.node_battery_power_kw[node_idx])
                 if charge_power < 0:
-                    peak_charge_penalty -= 50.0 * (-charge_power)
+                    peak_charge_penalty += self.R_PEAK_CHARGE_PENALTY * (-charge_power)
 
-            # ==============================================================
-            # FIX 2 – CLEAN PEAK DISCHARGE BONUS
-            # Extra incentive when BESS successfully serves peak demand
-            # WITHOUT causing any voltage violations.  This closes the gap
-            # between ~18:00 negative rewards and the daytime positives,
-            # giving PPO a clear gradient to improve peak-hour behaviour.
-            # ==============================================================
-            critical_nodes = list(range(21)) + [self.bess_index]
-            if (np.all(self.voltages_min[critical_nodes] >= 0.94) and
-                    np.all(self.voltages_max[critical_nodes] <= 1.06)):
+            # Clean peak discharge bonus
+            if (np.all(self.voltages_min[self.critical_nodes] >= 0.94) and
+                    np.all(self.voltages_max[self.critical_nodes] <= 1.06)):
                 # No violations – reward every kW of clean discharge
                 clean_discharge = np.sum(np.maximum(0, self.node_battery_power_kw))
-                clean_peak_bonus = 50.0 * clean_discharge
+                clean_peak_bonus = self.R_CLEAN_PEAK_BONUS * clean_discharge
 
         # ---- C. Off-peak bonuses ----
         offpeak_bonus = 0.0
@@ -635,9 +742,9 @@ class UrbanVPPEnv(gym.Env):
                             solar_will_be_sufficient = True
 
                 if solar_will_be_sufficient:
-                    offpeak_bonus = 4.0 * home_charge_power
+                    offpeak_bonus = self.R_HOME_OFFPEAK_SOLAR_OK * home_charge_power
                 else:
-                    offpeak_bonus = -8.0 * home_charge_power
+                    offpeak_bonus = self.R_HOME_OFFPEAK_NEEDED * home_charge_power
 
             # BESS off-peak charging
             bess_soc        = self.soc[2]
@@ -660,41 +767,22 @@ class UrbanVPPEnv(gym.Env):
         # ---- D. Grid smoothing penalty ----
         current_grid_net  = np.sum(self.net_injection)
         grid_power_change = abs(current_grid_net - self.prev_grid_net_power)
-        ramp_threshold    = 5.0
-        if grid_power_change > ramp_threshold:
-            excess_ramp          = grid_power_change - ramp_threshold
-            grid_smoothing_penalty = -0.1 * excess_ramp
+        if grid_power_change > self.R_RAMP_THRESHOLD:
+            excess_ramp          = grid_power_change - self.R_RAMP_THRESHOLD
+            grid_smoothing_penalty = self.R_RAMP_PENALTY_RATE * excess_ramp
         else:
             grid_smoothing_penalty = 0.0
         self.prev_grid_net_power = current_grid_net
 
         # ---- E. Voltage penalties & bonuses ----
-        critical_nodes = list(range(21)) + [self.bess_index]
-        min_voltages   = self.voltages_min[critical_nodes]
-        max_voltages   = self.voltages_max[critical_nodes]
+        min_voltages   = self.voltages_min[self.critical_nodes]
+        max_voltages   = self.voltages_max[self.critical_nodes]
 
         under_voltage   = np.maximum(0, 0.94 - min_voltages)
         over_voltage    = np.maximum(0, max_voltages - 1.06)
         total_violation = np.sum(over_voltage + under_voltage)
 
-        # ==============================================================
-        # FIX V3 – THREE-TIER VOLTAGE PENALTY
-        # The original two-tier penalty (soft/hard) was insufficient for
-        # the deep 0.90 p.u. sag seen in the uploaded image.
-        # At 0.90 p.u., violation = 0.04 p.u. which fell into the
-        # "hard" tier at −100/p.u. → total penalty only −4.
-        # That is negligible vs the off-peak charging bonus.
-        #
-        # New three-tier structure:
-        #   Tier 1 soft    : 0    to 0.03 p.u. → −25   (gradient signal)
-        #   Tier 2 hard    : 0.03 to 0.06 p.u. → −100  (strong deterrent)
-        #   Tier 3 severe  : beyond 0.06 p.u.  → −500  (near-infinite wall)
-        #
-        # The 0.90 p.u. case (violation = 0.04):
-        #   Old: −100 × 0.04 = −4
-        #   New: −25×0.03 + −100×0.01 = −0.75 − 1.0 = −1.75 ... PLUS
-        #        if voltage ever hits 0.88 (violation=0.06): −500 kicks in
-        # ==============================================================
+        # Three-tier voltage penalty
         raw_violations  = over_voltage + under_voltage
 
         soft_violations   = np.minimum(0.03, raw_violations)
@@ -702,9 +790,9 @@ class UrbanVPPEnv(gym.Env):
         severe_violations = np.maximum(0.0, raw_violations - 0.06)
 
         voltage_penalty = (
-            -25.0  * np.sum(soft_violations)
-            - 100.0 * np.sum(hard_violations)
-            - 500.0 * np.sum(severe_violations)   # NEW: heavy penalty for deep violations
+            self.R_VOLT_SOFT_PER_PU   * np.sum(soft_violations)
+            + self.R_VOLT_HARD_PER_PU   * np.sum(hard_violations)
+            + self.R_VOLT_SEVERE_PER_PU * np.sum(severe_violations)
         )
 
         if self.verbose and np.sum(severe_violations) > 0:
@@ -714,30 +802,32 @@ class UrbanVPPEnv(gym.Env):
 
         ideal_nodes      = np.sum((min_voltages >= 0.98) & (max_voltages <= 1.02))
         acceptable_nodes = np.sum((min_voltages >= 0.94) & (max_voltages <= 1.06))
-        voltage_stability_bonus = 20.0 * ideal_nodes + 5.0 * (acceptable_nodes - ideal_nodes)
+        voltage_stability_bonus = (self.R_IDEAL_NODE_BONUS * ideal_nodes
+                                   + self.R_ACCEPTABLE_NODE_BONUS * (acceptable_nodes - ideal_nodes))
 
         # ---- F. Battery cycling & SoC health ----
         final_power_array = np.array([self.node_battery_power_kw[n] for n in self.storage_map])
         power_changes     = final_power_array - prev_batt_power_copy
-        cycling_cost      = -0.3 * np.sum(np.abs(power_changes)) - 0.1 * np.sum(power_changes ** 2)
+        cycling_cost      = (self.R_CYCLING_LINEAR * np.sum(np.abs(power_changes))
+                             + self.R_CYCLING_QUADRATIC * np.sum(power_changes ** 2))
 
         soc_health_penalty = 0.0
         for i in range(len(self.soc)):
             if self.soc[i] < 0.2:
-                soc_health_penalty -= 50.0 * (0.2 - self.soc[i]) ** 2
+                soc_health_penalty += self.R_SOC_HEALTH_PENALTY * (0.2 - self.soc[i]) ** 2
             elif self.soc[i] > 0.8:
-                soc_health_penalty -= 50.0 * (self.soc[i] - 0.8) ** 2
+                soc_health_penalty += self.R_SOC_HEALTH_PENALTY * (self.soc[i] - 0.8) ** 2
 
         # ---- G. Total reward ----
         reward = (
-            revenue * 0.6
-            - cost   * 0.6
+            revenue * self.R_ECONOMIC_WEIGHT
+            - cost   * self.R_ECONOMIC_WEIGHT
             + voltage_penalty
             + voltage_stability_bonus
             + daytime_solar_bonus
             + solar_waste_penalty
             + peak_bonus
-            + clean_peak_bonus           # NEW
+            + clean_peak_bonus
             + peak_charge_penalty
             + offpeak_bonus
             + grid_smoothing_penalty
@@ -745,19 +835,14 @@ class UrbanVPPEnv(gym.Env):
             + soc_health_penalty
         )
 
-        # ==================================================================
-        # FIX 3 – REWARD NORMALISATION
-        # Original divisor of 5.0 was too small for instantaneous values
-        # reaching ~600 (see 3_rewards.png).  Dividing by 200 maps the
-        # typical range to [-3, 3] which is stable for PPO with clip_range=0.2.
-        # Clipping to [-10, 10] prevents outlier steps from corrupting updates.
-        # ==================================================================
-        reward = reward / 200.0
-        reward = float(np.clip(reward, -10.0, 10.0))
+        # Normalise and clip
+        reward = reward / self.R_NORMALIZER
+        reward = float(np.clip(reward, self.R_CLIP_LOW, self.R_CLIP_HIGH))
 
         if self.verbose and self.current_step % 24 == 0:
             print(f"[REWARD_DEBUG] Hour {hour:.1f}:")
-            print(f"  Economic: revenue={revenue:.0f}, cost={cost:.0f}, net_scaled={(revenue-cost)*0.6:.0f}")
+            print(f"  Economic: revenue={revenue:.0f}, cost={cost:.0f}, "
+                  f"net_scaled={(revenue-cost)*self.R_ECONOMIC_WEIGHT:.0f}")
             print(f"  Voltages: min={np.min(min_voltages):.4f}, max={np.max(max_voltages):.4f}, "
                   f"penalty={voltage_penalty:.0f}, bonus={voltage_stability_bonus:.0f}")
             print(f"  Battery: cycling={cycling_cost:.0f}, soc_health={soc_health_penalty:.0f}")
@@ -765,22 +850,7 @@ class UrbanVPPEnv(gym.Env):
                   f"clean_peak={clean_peak_bonus:.0f}, offpeak={offpeak_bonus:.0f}")
             print(f"  Total reward (after norm+clip): {reward:.4f}")
 
-        # --- 5. TRANSITION ---
-        self.current_step += 1
-        terminated = (self.current_step >= self.max_steps)
-        truncated  = False
-        obs        = self._get_obs() if not terminated else self.state
-
-        info = {
-            "hour": hour,
-            "net_demand": net_demand,
-            "remaining_demand": self.remaining_demand,
-            "max_voltage": float(np.max(max_voltages)),
-            "min_voltage": float(np.min(min_voltages)),
-            "violation": total_violation,
-            "solar_surplus": net_solar_surplus,
-            "total_load": total_load,
-            "total_solar": total_solar,
+        reward_info = {
             "revenue": revenue,
             "cost": cost,
             "profit": revenue - cost,
@@ -788,16 +858,105 @@ class UrbanVPPEnv(gym.Env):
             "grid_import_cost": grid_import_cost,
             "bess_discharge_revenue": bess_discharge_revenue,
             "bess_charge_cost": bess_charge_cost,
-            "soc_home3": self.soc[0],
-            "soc_home5": self.soc[1],
-            "soc_bess": self.soc[2],
-            "bess_power": self.node_battery_power_kw[self.bess_index],
             "voltage_penalty": voltage_penalty,
             "clean_peak_bonus": clean_peak_bonus,
             "grid_smoothing_penalty": grid_smoothing_penalty,
             "grid_power_change": grid_power_change,
             "current_grid_net": current_grid_net,
             "peak_import_target": peak_import_target,
+            "total_violation": total_violation,
+            "remaining_demand": remaining_demand,
+        }
+
+        return reward, reward_info
+
+    # ------------------------------------------------------------------
+    def step(self, action):
+        """Run one environment step: guidance → physics → simulation → reward."""
+
+        # --- 1. GET DATA ---
+        full_solar_profile = np.zeros(self.n_nodes, dtype=np.float32)
+        full_load_profile  = np.zeros(self.n_nodes, dtype=np.float32)
+        full_solar_profile[:21] = self.solar_episode[self.current_step]
+        full_load_profile[:21]  = self.load_episode[self.current_step]
+
+        total_load  = float(np.sum(full_load_profile))
+        total_solar = float(np.sum(full_solar_profile))
+        hour = (self.current_step % 96) / 4.0
+
+        net_demand        = max(0.0, total_load - total_solar)
+        net_solar_surplus = total_solar - total_load
+        remaining_solar_surplus  = max(0.0, net_solar_surplus)
+        peak_import_target       = self._compute_peak_import_target(hour)
+
+        bess_soc = self.soc[2]
+
+        # --- 2. SOFT ACTION GUIDANCE ---
+        action_modified = self._apply_soft_guidance(
+            action, hour, net_solar_surplus, net_demand,
+            bess_soc, peak_import_target
+        )
+
+        # --- 3. PHYSICS: APPLY ACTIONS ---
+        remaining_demand, remaining_solar_surplus, prev_batt_power_copy = \
+            self._apply_physics_constraints(
+                action_modified, hour, net_solar_surplus,
+                remaining_solar_surplus, total_solar, total_load
+            )
+
+        # --- 4. OpenDSS PHYSICS ---
+        converged = self._run_opendss(full_solar_profile, full_load_profile)
+
+        # --- 5. REWARD CALCULATION ---
+        reward, reward_info = self._compute_reward(
+            hour, net_demand, net_solar_surplus, total_solar,
+            total_load, prev_batt_power_copy, peak_import_target,
+            converged, remaining_demand
+        )
+
+        # --- 6. TRANSITION ---
+        self.current_step += 1
+        terminated = (self.current_step >= self.max_steps)
+        truncated  = False
+
+        # Terminal SoC reward: incentivise leaving batteries near 50% at end-of-day
+        if terminated:
+            terminal_penalty = 0.0
+            for i in range(self.n_storage_units):
+                soc_deviation = abs(self.soc[i] - 0.5)
+                terminal_penalty += self.R_TERMINAL_SOC_PENALTY * soc_deviation
+            reward += terminal_penalty / self.R_NORMALIZER
+            reward = float(np.clip(reward, self.R_CLIP_LOW, self.R_CLIP_HIGH))
+
+        obs = self._get_obs() if not terminated else self.state
+
+        info = {
+            "hour": hour,
+            "net_demand": net_demand,
+            "remaining_demand": remaining_demand,
+            "max_voltage": float(np.max(self.voltages_max[self.critical_nodes])),
+            "min_voltage": float(np.min(self.voltages_min[self.critical_nodes])),
+            "violation": reward_info["total_violation"],
+            "solar_surplus": net_solar_surplus,
+            "total_load": total_load,
+            "total_solar": total_solar,
+            "revenue": reward_info["revenue"],
+            "cost": reward_info["cost"],
+            "profit": reward_info["profit"],
+            "grid_export_revenue": reward_info["grid_export_revenue"],
+            "grid_import_cost": reward_info["grid_import_cost"],
+            "bess_discharge_revenue": reward_info["bess_discharge_revenue"],
+            "bess_charge_cost": reward_info["bess_charge_cost"],
+            "soc_home3": self.soc[0],
+            "soc_home5": self.soc[1],
+            "soc_bess": self.soc[2],
+            "bess_power": self.node_battery_power_kw[self.bess_index],
+            "voltage_penalty": reward_info["voltage_penalty"],
+            "clean_peak_bonus": reward_info["clean_peak_bonus"],
+            "grid_smoothing_penalty": reward_info["grid_smoothing_penalty"],
+            "grid_power_change": reward_info["grid_power_change"],
+            "current_grid_net": reward_info["current_grid_net"],
+            "peak_import_target": reward_info["peak_import_target"],
         }
 
         return obs, reward, terminated, truncated, info
@@ -815,15 +974,15 @@ class UrbanVPPEnv(gym.Env):
         [0]     Solar  / OBS_SOLAR_MAX          → 0..1  (non-negative)
         [1-21]  Load   / OBS_LOAD_MAX           → 0..1  (non-negative)
         [22-43] (Voltage - 1.0) / OBS_VOLT_RANGE→ ~-1..+1 centred on nominal
-        [44-46] SoC already in [0.2, 0.8]       → kept as-is (within [-2,2])
+        [44-46] (SoC - 0.5) / 0.3               → -1..+1 centred on midpoint
         [47-50] sin/cos features                → already in [-1, 1]
         """
         if self.current_step < self.max_steps:
-            common_solar_raw = np.array([self.solar_episode[self.current_step][0]])
+            common_solar_raw = np.array([self.solar_episode[self.current_step][0]], dtype=np.float32)
             load_step_raw    = self.load_episode[self.current_step]
         else:
-            common_solar_raw = np.array([0.0])
-            load_step_raw    = np.zeros(21)
+            common_solar_raw = np.array([0.0], dtype=np.float32)
+            load_step_raw    = np.zeros(21, dtype=np.float32)
 
         # --- Normalise solar (0 to ~1) ---
         common_solar_norm = common_solar_raw / self.OBS_SOLAR_MAX
@@ -835,8 +994,8 @@ class UrbanVPPEnv(gym.Env):
         # 0.85 p.u. → -1.0,  1.00 p.u. → 0.0,  1.15 p.u. → +1.0
         volt_norm = (self.voltages - self.OBS_VOLT_NOM) / self.OBS_VOLT_RANGE
 
-        # --- SoC: already in [0.2, 0.8], no scaling needed ---
-        soc_norm = self.soc   # range [0.2, 0.8] comfortably within [-2, 2]
+        # --- Normalise SoC: [0.2, 0.8] → [-1, +1] ---
+        soc_norm = (self.soc - self.OBS_SOC_CENTER) / self.OBS_SOC_RANGE
 
         # --- Time features: sin/cos already in [-1, 1] ---
         time_angle = (self.current_step / self.max_steps) * 2 * np.pi
@@ -844,13 +1003,13 @@ class UrbanVPPEnv(gym.Env):
         date_time_feats = np.array([
             np.sin(time_angle), np.cos(time_angle),
             np.sin(day_angle),  np.cos(day_angle)
-        ])
+        ], dtype=np.float32)
 
         self.state = np.concatenate([
             common_solar_norm,   # 1   → [0, 1]
             load_step_norm,      # 21  → [0, 1]
             volt_norm,           # 22  → [-1, +1]
-            soc_norm,            # 3   → [0.2, 0.8]
+            soc_norm,            # 3   → [-1, +1]
             date_time_feats      # 4   → [-1, +1]
         ]).astype(np.float32)
 

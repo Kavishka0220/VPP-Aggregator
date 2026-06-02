@@ -271,7 +271,7 @@ def plot_comparison(scenario_name=SCENARIO):
     plt.savefig(output_fig_pdf, bbox_inches='tight')
     print(f"📊 Saved comparison plot to: {output_fig_png}")
     print(f"📊 Saved comparison plot to: {output_fig_pdf}")
-    plt.show()
+    #plt.show()
 
 
 def plot_bess_power_and_voltage(scenario_name=SCENARIO):
@@ -325,7 +325,7 @@ def plot_bess_power_and_voltage(scenario_name=SCENARIO):
     plt.savefig(output_fig_pdf, dpi=300, bbox_inches='tight')
     print(f"📊 Saved power-voltage plot to: {output_fig_png}")
     print(f"📊 Saved power-voltage plot to: {output_fig_pdf}")
-    plt.show()
+    #plt.show()
 
 
 if __name__ == "__main__":

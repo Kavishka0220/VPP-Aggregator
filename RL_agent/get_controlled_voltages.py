@@ -28,7 +28,7 @@ from openDSS.run_opendss import VPPDSSRunner
 # ============================================================================
 # ⚙️  CONFIGURATION - Change scenario here
 # ============================================================================
-#SCENARIO = "night_peak"  # Options: "night_peak", "daytime_peak", "solar_unavailable_day", "low_load_weekend"
+SCENARIO = None  # Options: "night_peak", "daytime_peak", "solar_unavailable_day", "low_load_weekend"
 # ============================================================================
 
 
@@ -268,7 +268,7 @@ def plot_comparison(scenario_name=SCENARIO):
     output_fig_pdf = output_dir / f"voltage_control_comparison_{scenario_name}.pdf"
     plt.tight_layout()
     plt.savefig(output_fig_png, dpi=300, bbox_inches='tight')
-    plt.savefig(output_fig_pdf, bbox_inches='tight')
+    #plt.savefig(output_fig_pdf, bbox_inches='tight')
     print(f"📊 Saved comparison plot to: {output_fig_png}")
     print(f"📊 Saved comparison plot to: {output_fig_pdf}")
     #plt.show()
@@ -322,7 +322,7 @@ def plot_bess_power_and_voltage(scenario_name=SCENARIO):
     output_fig_pdf = output_dir / f"bess_power_and_voltage_{scenario_name}.pdf"
     plt.tight_layout()
     plt.savefig(output_fig_png, dpi=300, bbox_inches='tight')
-    plt.savefig(output_fig_pdf, dpi=300, bbox_inches='tight')
+    #plt.savefig(output_fig_pdf, dpi=300, bbox_inches='tight')
     print(f"📊 Saved power-voltage plot to: {output_fig_png}")
     print(f"📊 Saved power-voltage plot to: {output_fig_pdf}")
     #plt.show()

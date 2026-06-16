@@ -502,14 +502,18 @@ class UrbanVPPEnv(gym.Env):
                         desired_power = max(0, desired_power - excess * 0.8)
 
             # CONSTRAINT 8: BESS solar-charging uses available surplus
-            if is_bess and desired_power < 0 and 6 <= hour < 18 and remaining_solar_surplus > 0:
-                if self.soc[i] < 0.8:
+            if is_bess and desired_power < 0 and 6 <= hour < 18:
+                if remaining_solar_surplus > 0 and self.soc[i] < 0.8:
                     available_charge = min(
                         remaining_solar_surplus,
                         self._max_charge_power_from_headroom(self.soc[i], cap, p_max),
                     )
                     desired_power = -available_charge
                 else:
+                    # No solar surplus → grid-charging now pays the daytime
+                    # tariff (35 LKR) instead of the cheaper off-peak rate
+                    # (21 LKR). Block it; off-peak predictive charging
+                    # (hour < 6) already tops up the BESS before peak.
                     desired_power = 0.0
 
             # CONSTRAINT 9: Home battery daytime solar charging

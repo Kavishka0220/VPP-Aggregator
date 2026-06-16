@@ -258,7 +258,7 @@ def plot_comparison(scenario_name=SCENARIO):
     ax.set_ylabel("Voltage (p.u.)", fontsize=22)
     #ax.set_title(f"BESS Voltage Control Impact - {scenario_name}", fontsize=25, fontweight='bold')
     ax.set_title(f"BESS Voltage Control Impact", fontsize=25, fontweight='bold')
-    ax.legend(loc='best',fontsize=18)
+    ax.legend(loc='upper right', ncol=2, fontsize=18)
     ax.grid(True, alpha=0.3)
     ax.set_ylim([0.85, 1.15])
     ax.set_xlim([0, 24])

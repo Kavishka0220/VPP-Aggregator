@@ -135,7 +135,7 @@ def plot_training_rewards(data, output_dir='./results_plots'):
     
     # Save as PDF
     output_file_pdf = f"{output_dir}/training_reward.pdf"
-    plt.savefig(output_file_pdf, format='pdf', bbox_inches='tight')
+    #plt.savefig(output_file_pdf, format='pdf', bbox_inches='tight')
     print(f"[OK] Saved training plot to '{output_file_pdf}'")
     
     return fig
@@ -189,11 +189,11 @@ def plot_multiple_runs(base_dir='./tensorboard_logs', output_dir='./results_plot
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"[OK] Saved comparison plot to '{output_file}'")
     
-    #output_file_pdf = f"{output_dir}/training_comparison.pdf"
+    output_file_pdf = f"{output_dir}/training_comparison.pdf"
     #plt.savefig(output_file_pdf, format='pdf', bbox_inches='tight')
-    #print(f"[OK] Saved comparison plot to '{output_file_pdf}'")
+    print(f"[OK] Saved comparison plot to '{output_file_pdf}'")
     
-    #plt.show()
+    plt.show()
 
 
 def main():

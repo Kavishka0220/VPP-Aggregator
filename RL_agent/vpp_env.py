@@ -97,6 +97,11 @@ class UrbanVPPEnv(gym.Env):
 
     # =================================================================
 
+    # SoC floor/ceiling are stored as float32; comparing a float32 value
+    # against a bare float64 literal (e.g. "<= 0.2") can silently fail to
+    # trigger due to rounding. This tolerance absorbs that gap.
+    SOC_EPS = 1e-4
+
     def __init__(self, data_path="./data", scenario_name=None, start_index=None, verbose=False):
         super(UrbanVPPEnv, self).__init__()
 
@@ -290,7 +295,9 @@ class UrbanVPPEnv(gym.Env):
         return min(p_max, headroom_kwh / (0.25 * 0.95))
 
     def _max_discharge_power_from_soc(self, soc, cap, p_max):
-        if soc <= 0.2:
+        # soc is stored as float32; float32(0.2) is fractionally above the
+        # float64 literal 0.2, so a bare "<= 0.2"/"- 0.2" never floors out.
+        if soc <= 0.2 + self.SOC_EPS:
             return 0.0
         deliverable_kwh = (soc - 0.2) * cap * 0.95
         return min(p_max, deliverable_kwh / 0.25)
@@ -361,6 +368,14 @@ class UrbanVPPEnv(gym.Env):
             target = shaped_discharge / self.bess_power if self.bess_power > 0 else 0.0
             # SOFT: blend toward shaped target
             action_modified[bess_action_idx] = 0.7 * target + 0.3 * action[bess_action_idx]
+
+        # --- Home batteries: peak-hour discharge guidance (soft) ---
+        if 18 <= hour < 23 and net_demand > 0:
+            for hb_idx in range(len(self.home_batt_indices)):
+                if self.soc[hb_idx] > 0.2 + self.SOC_EPS:
+                    demand_share = min(1.0, net_demand / (len(self.home_batt_indices) * self.home_batt_power))
+                    target = demand_share
+                    action_modified[hb_idx] = 0.7 * target + 0.3 * action[hb_idx]
 
         # --- Home batteries: daytime solar charging guidance (soft) ---
         if 6 <= hour < 18 and net_solar_surplus > 0:
@@ -457,7 +472,12 @@ class UrbanVPPEnv(gym.Env):
             # -- Hard physical constraints (these stay hard) --
 
             # CONSTRAINT 1: SoC limits
-            if self.soc[i] <= 0.2 and desired_power > 0:
+            # NOTE: self.soc is float32, and float32(0.2) is fractionally
+            # above the float64 literal 0.2, so a bare "<= 0.2" never
+            # triggers at the floor — the battery could discharge forever
+            # while SoC reads as pinned at 0.2 (np.clip resets it every
+            # step). Use an epsilon tolerance so the floor actually holds.
+            if self.soc[i] <= 0.2 + self.SOC_EPS and desired_power > 0:
                 desired_power = 0.0
             if self.soc[i] >= 0.8 and desired_power < 0:
                 desired_power = 0.0
@@ -466,8 +486,8 @@ class UrbanVPPEnv(gym.Env):
             # BESS must be idle during this period — no charging or discharging
             if is_bess and 23 <= hour:
                 desired_power = 0.0
-            # Home batteries: still block charging only
-            elif not is_bess and 23 <= hour and desired_power < 0:
+            # Home batteries: block both charging and discharging after 11pm
+            elif not is_bess and 23 <= hour:
                 desired_power = 0.0
 
             # CONSTRAINT 3: Block ALL charging during peak (6pm–11pm)

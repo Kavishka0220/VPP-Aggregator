@@ -113,7 +113,7 @@ def plot_training_rewards(data, output_dir='./results_plots'):
     ax.axhline(y=max_reward, color='green', linestyle=':', linewidth=1.5, alpha=0.6, label='Max Reward')
     #ax.axhline(y=mean_reward, color='orange', linestyle=':', linewidth=1.5, alpha=0.6)
     
-    ax.set_title('Training Reward Over Time', fontsize=24, fontweight='bold')
+    ax.set_title('Training Reward Over Time', fontsize=24, fontweight='bold', color='white')
     ax.set_xlabel('Training Steps (Timesteps)', fontweight='bold', fontsize=21)
     ax.set_ylabel('Mean Episode Reward', fontweight='bold', fontsize=21)
     ax.grid(True, alpha=0.3)
@@ -178,7 +178,7 @@ def plot_multiple_runs(base_dir='./tensorboard_logs', output_dir='./results_plot
             
             ax.plot(steps, rewards, color=colors[idx], linewidth=1.5, alpha=0.7, label=run_dir.name)
     
-    ax.set_title('Training Reward Comparison: Multiple Runs', fontsize=22, fontweight='bold')
+    ax.set_title('Training Reward Comparison: Multiple Runs', fontsize=22, fontweight='bold', color='white')
     ax.set_xlabel('Training Steps (Timesteps)', fontweight='bold')
     ax.set_ylabel('Mean Episode Reward', fontweight='bold')
     ax.legend(loc='best', fontsize=18)

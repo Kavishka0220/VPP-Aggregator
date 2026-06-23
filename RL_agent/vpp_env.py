@@ -389,56 +389,22 @@ class UrbanVPPEnv(gym.Env):
                         # SOFT: blend
                         action_modified[hb_idx] = 0.6 * target + 0.4 * action[hb_idx]
 
-        # --- Off-peak BESS predictive charging (soft) ---
+        # --- Off-peak BESS charging: target SOC=0.8 before peak (soft) ---
         if hour < 6:
-            steps_remaining   = self.max_steps - self.current_step
-            steps_until_peak  = min(steps_remaining, int((18 - hour) * 4))
-
-            if steps_until_peak > 4:
-                future_solar = self.solar_episode[self.current_step:self.current_step + steps_until_peak]
-                future_load  = self.load_episode[self.current_step:self.current_step + steps_until_peak]
-                expected_daytime_surplus = np.sum(future_solar) - np.sum(future_load)
-
-                if expected_daytime_surplus > 0:
-                    expected_surplus_energy = expected_daytime_surplus * 0.25 * 0.95
-                    energy_needed = max(0, (0.8 - bess_soc) * self.bess_cap)
-
-                    if expected_surplus_energy >= energy_needed:
-                        # Solar will be enough – gently discourage grid charging
-                        action_modified[bess_action_idx] = np.clip(action[bess_action_idx], -0.1, 1.0)
-                    else:
-                        energy_deficit = energy_needed - expected_surplus_energy
-                        if hour >= 23:
-                            steps_until_daytime = int((24 - hour) * 4 + 6 * 4)
-                        else:
-                            steps_until_daytime = int((6 - hour) * 4)
-
-                        if steps_until_daytime > 0:
-                            power_per_step    = energy_deficit / (steps_until_daytime * 0.25)
-                            charge_intensity  = min(1.0, power_per_step / self.bess_power)
-                        else:
-                            charge_intensity = 0.5
-
-                        target = -charge_intensity
-                        action_modified[bess_action_idx] = 0.6 * target + 0.4 * action[bess_action_idx]
-                else:
-                    # No daytime solar expected – encourage grid charging
-                    if bess_soc < 0.8:
-                        if hour >= 23:
-                            steps_until_daytime = int((24 - hour) * 4 + 6 * 4)
-                        else:
-                            steps_until_daytime = int((6 - hour) * 4)
-
-                        if steps_until_daytime > 0:
-                            power_per_step   = ((0.8 - bess_soc) * self.bess_cap) / (steps_until_daytime * 0.25)
-                            charge_intensity = min(1.0, power_per_step / self.bess_power)
-                            target = -charge_intensity
-                            action_modified[bess_action_idx] = 0.6 * target + 0.4 * action[bess_action_idx]
+            if bess_soc < 0.8:
+                # Always request full 40 kW charging during cheap off-peak (21 LKR).
+                # The 5 kW/step ramp rate and voltage-aware charge limiter moderate
+                # actual draw.  SOC=0.8 hard cap prevents overcharging.
+                action_modified[bess_action_idx] = 0.80 * (-1.0) + 0.20 * action[bess_action_idx]
             else:
-                if bess_soc < 0.4:
-                    action_modified[bess_action_idx] = np.clip(action[bess_action_idx], -1.0, -0.5)
-                elif bess_soc < 0.6:
-                    action_modified[bess_action_idx] = np.clip(action[bess_action_idx], -0.7, 0.0)
+                # BESS is full — hold charge, stay idle.
+                # Off-peak sell price = 0 LKR, so discharging now earns nothing
+                # and wastes the cheap energy stored for peak (67 LKR).
+                # Clip at 0 so any positive (discharge) component from the agent
+                # is suppressed; charging is already blocked by the SOC=0.8 hard cap.
+                action_modified[bess_action_idx] = min(
+                    0.0, 0.80 * 0.0 + 0.20 * action[bess_action_idx]
+                )
 
         return action_modified
 
@@ -570,15 +536,15 @@ class UrbanVPPEnv(gym.Env):
             # BESS node voltage is already approaching the 0.94 p.u. limit.
             #
             # Scaling zones:
-            #   voltage >= 0.97  → full charging allowed  (factor = 1.0)
-            #   voltage == 0.955 → 50% charging           (factor = 0.5)
+            #   voltage >= 0.95  → full charging allowed  (factor = 1.0)
+            #   voltage == 0.945 → 50% charging           (factor = 0.5)
             #   voltage <= 0.94  → charging blocked        (factor = 0.0)
             # ==============================================================
             if is_bess and final_power < 0:  # BESS is charging
                 bess_voltage = self.voltages[self.bess_index]
-                if bess_voltage < 0.97:
-                    # Linear scale: 0.0 at 0.94, 1.0 at 0.97
-                    voltage_factor = max(0.0, (bess_voltage - 0.94) / (0.97 - 0.94))
+                if bess_voltage < 0.95:
+                    # Linear scale: 0.0 at 0.94, 1.0 at 0.95
+                    voltage_factor = max(0.0, (bess_voltage - 0.94) / (0.95 - 0.94))
                     final_power = final_power * voltage_factor
                     if self.verbose and voltage_factor < 1.0:
                         print(f"[VOLTAGE_CHARGE_LIMIT] Hour {hour:.1f}: BESS voltage "
@@ -668,9 +634,9 @@ class UrbanVPPEnv(gym.Env):
             }
 
         # Time-of-use pricing (LKR)
-        if 6 <= hour < 18:
+        if 5.30 <= hour < 18.30:
             buy_price, sell_price = 35, 19
-        elif 18 <= hour < 23:
+        elif 18.30 <= hour < 22.30:
             buy_price, sell_price = 67, 45
         else:
             buy_price, sell_price = 21, 0
@@ -770,23 +736,27 @@ class UrbanVPPEnv(gym.Env):
                 else:
                     offpeak_bonus = self.R_HOME_OFFPEAK_NEEDED * home_charge_power
 
-            # BESS off-peak charging
-            bess_soc        = self.soc[2]
+            # BESS off-peak charging toward full SOC
+            # Always reward charging during cheap off-peak (21 LKR) when headroom exists.
+            # Reward scales with remaining headroom: emptier BESS → higher per-kW bonus,
+            # creating urgency to fill up before daytime.  Extra bonus when daytime solar
+            # alone cannot cover the remaining deficit to SOC=0.8.
+            bess_soc_now    = self.soc[2]
             bess_charge_pwr = self.node_battery_power_kw[self.bess_index]
-            if bess_charge_pwr < 0:
+            if bess_charge_pwr < 0 and bess_soc_now < 0.8:
+                soc_headroom    = max(0.0, 0.8 - bess_soc_now)        # 0.0 → 0.6
+                headroom_factor = 1.0 + (soc_headroom / 0.6) * 1.5    # 1.0 → 2.5
+                offpeak_bonus  += -headroom_factor * 9.0 * bess_charge_pwr
+
                 steps_remaining  = self.max_steps - self.current_step
                 steps_until_peak = min(steps_remaining, int((18 - hour) * 4))
-                if steps_until_peak > 4:
-                    fs = self.solar_episode[self.current_step:self.current_step + steps_until_peak]
-                    fl = self.load_episode[self.current_step:self.current_step + steps_until_peak]
-                    expected_surplus_energy = (np.sum(fs) - np.sum(fl)) * 0.25 * 0.95
-                    energy_needed = (0.75 - bess_soc) * self.bess_cap
-                    if expected_surplus_energy < energy_needed:
-                        offpeak_bonus += -10.0 * bess_charge_pwr
-                    else:
-                        offpeak_bonus += -5.0 * bess_charge_pwr
-                else:
-                    offpeak_bonus += (-8.0 if bess_soc < 0.4 else -5.0) * bess_charge_pwr
+                if steps_until_peak > 0:
+                    future_end           = self.current_step + steps_until_peak
+                    fs                   = self.solar_episode[self.current_step:future_end]
+                    fl                   = self.load_episode[self.current_step:future_end]
+                    expected_surplus_kwh = max(0.0, (np.sum(fs) - np.sum(fl))) * 0.25 * 0.95
+                    if expected_surplus_kwh < (0.8 - bess_soc_now) * self.bess_cap:
+                        offpeak_bonus += -6.0 * bess_charge_pwr
 
         # ---- D. Grid smoothing penalty ----
         current_grid_net  = np.sum(self.net_injection)

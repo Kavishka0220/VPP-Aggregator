@@ -257,7 +257,7 @@ def plot_comparison(scenario_name=SCENARIO):
     ax.set_xlabel("Time (Hours)", fontsize=22)
     ax.set_ylabel("Voltage (p.u.)", fontsize=22)
     #ax.set_title(f"BESS Voltage Control Impact - {scenario_name}", fontsize=25, fontweight='bold')
-    ax.set_title(f"BESS Voltage Control Impact", fontsize=25, fontweight='bold')
+    ax.set_title(f"BESS Voltage Control Impact", fontsize=25, fontweight='bold', color='white')
     ax.legend(loc='upper right', ncol=2, fontsize=18)
     ax.grid(True, alpha=0.3)
     ax.set_ylim([0.85, 1.15])
@@ -301,7 +301,7 @@ def plot_bess_power_and_voltage(scenario_name=SCENARIO):
     ax1.bar(hours, df["bess_power"], width=0.2, color='#0055CC', alpha=0.7, label='BESS Power')
     ax1.axhline(0, color='black', linestyle='-', linewidth=1)
     ax1.set_ylabel("Power (kW)", fontsize=20)
-    ax1.set_title(f"BESS Discharge Control - {scenario_name}", fontsize=20, fontweight='bold')
+    ax1.set_title(f"BESS Discharge Control - {scenario_name}", fontsize=20, fontweight='bold', color='white')
     ax1.legend(loc='best', fontsize=16)
     ax1.grid(True, alpha=0.3)
     

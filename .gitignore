@@ -287,3 +287,4 @@ battery_cycling_latex.tex
 cycling_penalty_benchmarks.tex
 RL_agent/run_all.py
 /Dashboard
+results_plots/night_peak/1_power_exchange_detailed1.png

@@ -303,9 +303,9 @@ class UrbanVPPEnv(gym.Env):
         return min(p_max, deliverable_kwh / 0.25)
 
     def _compute_peak_import_target(self, hour):
-        if not (18 <= hour < 23):
+        if not (18.5 <= hour < 22.5):
             return None
-        peak_end_step = min(self.max_steps, self.current_step + int((23 - hour) * 4))
+        peak_end_step = min(self.max_steps, self.current_step + int((22.5 - hour) * 4))
         if peak_end_step <= self.current_step:
             return 0.0
 
@@ -352,7 +352,7 @@ class UrbanVPPEnv(gym.Env):
 
         # --- BESS: solar-surplus charging guidance (soft) ---
         if net_solar_surplus > 0 and bess_soc < 0.8:
-            if 6 <= hour < 18:
+            if 5.5 <= hour < 18.5:
                 charge_intensity = min(1.0, net_solar_surplus / (0.8 * self.bess_power))
             else:
                 charge_intensity = min(1.0, net_solar_surplus / self.bess_power)
@@ -370,7 +370,7 @@ class UrbanVPPEnv(gym.Env):
             action_modified[bess_action_idx] = 0.7 * target + 0.3 * action[bess_action_idx]
 
         # --- Home batteries: peak-hour discharge guidance (soft) ---
-        if 18 <= hour < 23 and net_demand > 0:
+        if 18.5 <= hour < 22.5 and net_demand > 0:
             for hb_idx in range(len(self.home_batt_indices)):
                 if self.soc[hb_idx] > 0.2 + self.SOC_EPS:
                     demand_share = min(1.0, net_demand / (len(self.home_batt_indices) * self.home_batt_power))
@@ -378,7 +378,7 @@ class UrbanVPPEnv(gym.Env):
                     action_modified[hb_idx] = 0.7 * target + 0.3 * action[hb_idx]
 
         # --- Home batteries: daytime solar charging guidance (soft) ---
-        if 6 <= hour < 18 and net_solar_surplus > 0:
+        if 5.5 <= hour < 18.5 and net_solar_surplus > 0:
             home_batt_avg_soc = np.mean([self.soc[0], self.soc[1]])
             if home_batt_avg_soc < 0.8:
                 home_charge_share = min(0.7, net_solar_surplus / 8.0)
@@ -390,7 +390,7 @@ class UrbanVPPEnv(gym.Env):
                         action_modified[hb_idx] = 0.6 * target + 0.4 * action[hb_idx]
 
         # --- Off-peak BESS charging: target SOC=0.8 before peak (soft) ---
-        if hour < 6:
+        if hour < 5.5 or hour >= 22.5:
             if bess_soc < 0.8:
                 # Always request full 40 kW charging during cheap off-peak (21 LKR).
                 # The 5 kW/step ramp rate and voltage-aware charge limiter moderate
@@ -429,7 +429,7 @@ class UrbanVPPEnv(gym.Env):
             # FIX V2: time-aware ramp rate for BESS
             # Off-peak charging uses tighter ramp to prevent voltage sag
             if is_bess:
-                ramp = self.bess_ramp_offpeak if hour < 6 else self.bess_ramp_peak
+                ramp = self.bess_ramp_offpeak if (hour < 5.5 or hour >= 22.5) else self.bess_ramp_peak
             else:
                 ramp = self.home_batt_ramp
 
@@ -448,28 +448,28 @@ class UrbanVPPEnv(gym.Env):
             if self.soc[i] >= 0.8 and desired_power < 0:
                 desired_power = 0.0
 
-            # CONSTRAINT 2: Block ALL BESS activity 11pm–midnight (transition hour)
+            # CONSTRAINT 2: Block ALL BESS activity 10:30pm–midnight (transition hour)
             # BESS must be idle during this period — no charging or discharging
-            if is_bess and 23 <= hour:
+            if is_bess and 22.5 <= hour:
                 desired_power = 0.0
-            # Home batteries: block both charging and discharging after 11pm
-            elif not is_bess and 23 <= hour:
+            # Home batteries: block both charging and discharging after 10:30pm
+            elif not is_bess and 22.5 <= hour:
                 desired_power = 0.0
 
             # CONSTRAINT 3: Block ALL charging during peak (6pm–11pm)
-            if 18 <= hour < 23 and desired_power < 0:
+            if 18.5 <= hour < 22.5 and desired_power < 0:
                 desired_power = 0.0
 
-            # CONSTRAINT 4: Home batteries – only discharge during peak (6pm–11pm)
+            # CONSTRAINT 4: Home batteries – only discharge during peak (6:30pm–10:30pm)
             # (kept as hard rule because discharging home batteries at other times
             #  always causes overvoltage in the feeder)
             if not is_bess and desired_power > 0:
-                if not (18 <= hour < 23):
+                if not (18.5 <= hour < 22.5):
                     desired_power = 0.0
 
             # CONSTRAINT 5: BESS – block discharge during daytime with solar surplus
             # (kept hard: solar + BESS discharge simultaneously → certain overvoltage)
-            if is_bess and desired_power > 0 and 6 <= hour < 18:
+            if is_bess and desired_power > 0 and 5.5 <= hour < 18.5:
                 if net_solar_surplus > 0:
                     desired_power = 0.0
 
@@ -482,13 +482,13 @@ class UrbanVPPEnv(gym.Env):
             if total_solar + max(0, desired_power) > total_load + 1.5:
                 excess = total_solar + max(0, desired_power) - total_load - 1.5
                 if is_bess and desired_power > 0:
-                    if 6 <= hour < 18 and excess > 0.5:
+                    if 5.5 <= hour < 18.5 and excess > 0.5:
                         desired_power = 0.0
                     else:
                         desired_power = max(0, desired_power - excess * 0.8)
 
             # CONSTRAINT 8: BESS solar-charging uses available surplus
-            if is_bess and desired_power < 0 and 6 <= hour < 18:
+            if is_bess and desired_power < 0 and 5.5 <= hour < 18.5:
                 if remaining_solar_surplus > 0 and self.soc[i] < 0.8:
                     available_charge = min(
                         remaining_solar_surplus,
@@ -499,11 +499,11 @@ class UrbanVPPEnv(gym.Env):
                     # No solar surplus → grid-charging now pays the daytime
                     # tariff (35 LKR) instead of the cheaper off-peak rate
                     # (21 LKR). Block it; off-peak predictive charging
-                    # (hour < 6) already tops up the BESS before peak.
+                    # (hour < 5.5) already tops up the BESS before peak.
                     desired_power = 0.0
 
             # CONSTRAINT 9: Home battery daytime solar charging
-            if not is_bess and 6 <= hour < 18 and desired_power < 0:
+            if not is_bess and 5.5 <= hour < 18.5 and desired_power < 0:
                 if net_solar_surplus > 0:
                     available_charge = min(
                         remaining_solar_surplus,
@@ -561,7 +561,7 @@ class UrbanVPPEnv(gym.Env):
             self.soc[i] = np.clip(self.soc[i], 0.2, 0.8)
 
             # Track remaining solar surplus consumed by charging
-            if 6 <= hour < 18 and final_power < 0 and remaining_solar_surplus > 0:
+            if 5.5 <= hour < 18.5 and final_power < 0 and remaining_solar_surplus > 0:
                 remaining_solar_surplus = max(0.0, remaining_solar_surplus - min(-final_power, remaining_solar_surplus))
 
             self.node_battery_power_kw[node_idx] = final_power
@@ -634,9 +634,10 @@ class UrbanVPPEnv(gym.Env):
             }
 
         # Time-of-use pricing (LKR)
-        if 5.30 <= hour < 18.30:
+        # Daytime (05:30-18:30), Peak (18:30-22:30), Off-peak (22:30-05:30)
+        if 5.5 <= hour < 18.5:
             buy_price, sell_price = 35, 19
-        elif 18.30 <= hour < 22.30:
+        elif 18.5 <= hour < 22.5:
             buy_price, sell_price = 67, 45
         else:
             buy_price, sell_price = 21, 0
@@ -659,7 +660,7 @@ class UrbanVPPEnv(gym.Env):
         daytime_solar_bonus = 0.0
         solar_waste_penalty = 0.0
 
-        if 6 <= hour < 18:
+        if 5.5 <= hour < 18.5:
             total_charge_power    = np.sum(np.minimum(0, self.node_battery_power_kw))
             total_discharge_power = np.sum(np.maximum(0, self.node_battery_power_kw))
 
@@ -688,7 +689,7 @@ class UrbanVPPEnv(gym.Env):
         peak_charge_penalty = 0.0
         clean_peak_bonus   = 0.0
 
-        if 18 <= hour < 23:
+        if 18.5 <= hour < 22.5:
             if np.mean(self.soc) > 0.3:
                 total_discharge_power = np.sum(np.maximum(0, self.node_battery_power_kw))
                 peak_bonus = self.R_PEAK_DISCHARGE_BONUS * total_discharge_power
@@ -710,7 +711,7 @@ class UrbanVPPEnv(gym.Env):
 
         # ---- C. Off-peak bonuses ----
         offpeak_bonus = 0.0
-        if hour < 6:
+        if hour < 5.5 or hour >= 22.5:
             home_batt_soc = [self.soc[0], self.soc[1]]
             if np.mean(home_batt_soc) < 0.8:
                 home_charge_power = (self.node_battery_power_kw[3]
@@ -722,7 +723,7 @@ class UrbanVPPEnv(gym.Env):
                 if steps_ahead > 24:
                     future_solar = self.solar_episode[self.current_step:self.current_step + steps_ahead]
                     future_load  = self.load_episode[self.current_step:self.current_step + steps_ahead]
-                    daylight_start = max(0, int((6 - hour) * 4))
+                    daylight_start = max(0, int((5.5 - hour) * 4))
                     daylight_end   = min(steps_ahead, daylight_start + 48)
                     if daylight_end > daylight_start:
                         expected_surplus = (np.sum(future_solar[daylight_start:daylight_end])
@@ -749,7 +750,7 @@ class UrbanVPPEnv(gym.Env):
                 offpeak_bonus  += -headroom_factor * 9.0 * bess_charge_pwr
 
                 steps_remaining  = self.max_steps - self.current_step
-                steps_until_peak = min(steps_remaining, int((18 - hour) * 4))
+                steps_until_peak = min(steps_remaining, int((18.5 - hour) * 4))
                 if steps_until_peak > 0:
                     future_end           = self.current_step + steps_until_peak
                     fs                   = self.solar_episode[self.current_step:future_end]

@@ -11,13 +11,13 @@ import numpy as np
 from vpp_env import UrbanVPPEnv
 
 def linear_schedule(initial_value: float):
-    """Linear learning rate schedule with exponential decay for stability."""
+    """Standard linear learning rate schedule: decays from initial_value to near 0."""
     def func(progress_remaining: float) -> float:
-        # Exponential decay: more aggressive early, then stabilize
-        # Clamp to prevent negative values from creating complex numbers
+        # Linear decay: full LR at start of training, approaches 0 at the end.
+        # Floor at 1e-6 to avoid completely switching off gradient updates.
         progress_clamped = max(progress_remaining, 0.0)
-        return progress_clamped * initial_value * (progress_clamped ** 0.5)
-    return func 
+        return max(progress_clamped * initial_value, 1e-6)
+    return func
 
 
 def main():
@@ -164,7 +164,7 @@ def main():
     callbacks = CallbackList([checkpoint_callback, eval_callback])
     
     # 4. Start Training
-    total_timesteps = 1000_000  # Updated to 500k steps for stable convergence
+    total_timesteps = 200_000  # Updated to 500k steps for stable convergence
     print("[START] PPO Training...")
     print(f"   Target: {total_timesteps:,} Timesteps")
     print(f"   Checkpoints every: {checkpoint_callback.save_freq:,} steps")

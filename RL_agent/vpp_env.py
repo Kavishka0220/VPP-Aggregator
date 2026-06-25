@@ -81,8 +81,8 @@ class UrbanVPPEnv(gym.Env):
 
     # Pre-peak readiness  (NEW)
     # Reward BESS being well-charged during the 2h window before peak (16:30–18:30)
-    R_PRE_PEAK_READY_BONUS   = 2.0     # per 0.01 SoC above 0.70 at 16:30–18:30
-    R_PRE_PEAK_FLOOR         = 0.70    # SoC floor that earns this bonus
+    R_PRE_PEAK_READY_BONUS   = 5.0     # per 0.01 SoC above floor at 16:30–18:30
+    R_PRE_PEAK_FLOOR         = 0.50    # SoC floor that earns this bonus
 
     # Peak hours
     R_PEAK_DISCHARGE_BONUS   = 40.0    # per kW of peak discharge
@@ -116,10 +116,10 @@ class UrbanVPPEnv(gym.Env):
     R_RAMP_PENALTY_RATE      = -0.15   # per kW above threshold
 
     # Voltage
-    R_VOLT_SOFT_PER_PU       = -30.0   # 0 to 0.03 p.u. violation
+    R_VOLT_SOFT_PER_PU       = -50.0   # 0 to 0.03 p.u. violation
     R_VOLT_HARD_PER_PU       = -120.0  # 0.03 to 0.06 p.u. violation
     R_VOLT_SEVERE_PER_PU     = -600.0  # beyond 0.06 p.u. violation
-    R_IDEAL_NODE_BONUS       = 25.0    # per node in [0.98, 1.02]
+    R_IDEAL_NODE_BONUS       = 50.0    # per node in [0.98, 1.02]
     R_ACCEPTABLE_NODE_BONUS  = 6.0     # per node in [0.94, 1.06] but not ideal
 
     # Battery health
@@ -264,7 +264,14 @@ class UrbanVPPEnv(gym.Env):
                 if df.shape[1] > 21:
                     df = df.iloc[:, :21]
                 elif df.shape[1] < 21:
-                    raise ValueError(f"{df_name} has only {df.shape[1]} columns, need 21")
+                    if df_name == "solar" and df.shape[1] == 1:
+                        # Single irradiance column (W/m²) → convert to per-node kW and broadcast to 21 nodes
+                        # Factor calibrated to ~4.3 kW peak per node at STC (1000 W/m²)
+                        power = df.iloc[:, 0].values * 0.0043
+                        df = pd.DataFrame(np.tile(power.reshape(-1, 1), 21),
+                                          columns=[f"Node{i+1}" for i in range(21)])
+                    else:
+                        raise ValueError(f"{df_name} has only {df.shape[1]} columns, need 21")
                 if df_name == "solar":
                     self.solar_df = df
                 else:

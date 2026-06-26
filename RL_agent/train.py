@@ -61,7 +61,7 @@ def main():
     check_env(UrbanVPPEnv(data_path=data_path, scenario_name=scenario_name), warn=True)
     
     # 1. Create Training Environments (Multiple for parallel training)
-    n_envs = 4  # Use 4 parallel environments for faster training
+    n_envs = 2  # Reduced from 4: each subprocess loads OpenDSS which accumulates RAM over time
     
     # Calculate start_step from start_hour if specified
     start_step = start_hour * 4 if start_hour is not None else None
@@ -127,13 +127,13 @@ def main():
         clip_range=0.2,             # Increased clip range to reduce instability
         clip_range_vf=0.2,          # Value function clipping
         n_epochs=10,                # More epochs for better convergence
-        n_steps=2048,               # Steps per environment before update
-        batch_size=64,             # Larger batch size for stability
+        n_steps=1024,               # Reduced from 2048: smaller rollout buffer saves RAM
+        batch_size=256,             # Larger batches → smoother per-step KL, fewer early stops
         ent_coef=0.005,             # Lower exploration for smoother convergence
         vf_coef=0.5,                # Value function coefficient
         max_grad_norm=0.5,          # Increased gradient clipping threshold
         policy_kwargs=policy_kwargs,
-        target_kl=0.02,              # Early stopping threshold for stability
+        target_kl=0.05,             # Raised from 0.02: 0.02 caused stop at step 0 every rollout
         seed=42,
         tensorboard_log=tensorboard_dir
     )

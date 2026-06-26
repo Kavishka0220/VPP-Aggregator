@@ -171,6 +171,23 @@ class UrbanVPPEnv(gym.Env):
         self.n_nodes = 22
         self.solar_indices = [3, 5, 7, 10, 11, 13, 15, 17, 18, 19, 20]
 
+        # Peak power (kW) of each solar node's PV panel at STC (1000 W/m²).
+        # Values taken directly from the feeder diagram.
+        # Nodes NOT in solar_indices are ignored (always 0 output).
+        self.solar_panel_kw_peak = {
+            3:   5.0,   # L3  — Solar 5 kW  + Battery 5kW/13.5kWh
+            5:   5.0,   # L5  — Solar 5 kW  + Battery 5kW/13.5kWh
+            7:   5.0,   # L7  — Solar 5 kW
+            10:  5.0,   # L10 — Solar 5 kW
+            11:  5.0,   # L11 — Solar 5 kW
+            13:  5.0,   # L13 — Solar 5 kW
+            15:  6.0,   # L15 — Solar 6 kW  (larger panel)
+            17:  5.0,   # L17 — Solar 5 kW
+            18:  5.0,   # L18 — Solar 5 kW
+            19:  5.0,   # L19 — Solar 5 kW
+            20: 15.0,   # L20 — Solar 15 kW (largest panel on feeder)
+        }
+
         if not all(0 <= idx < 21 for idx in self.solar_indices):
             raise ValueError(f"Solar indices must be in range [0, 20]. Got: {self.solar_indices}")
 
@@ -236,27 +253,35 @@ class UrbanVPPEnv(gym.Env):
         # Window wraps midnight: [22.5, 24) ∪ [0, 0.25)
         return hour >= self.NO_CHARGE_START or hour < self.NO_CHARGE_END
 
-    # ------------------------------------------------------------------
     def _load_data(self, data_path, scenario_name):
-        """Load and validate solar/load CSV data."""
+        """Load and validate solar/load CSV data.
+
+        Files are always loaded from the forecast_scenarios folder:
+            data/forecast_scenarios/solar_{scenario_name}.csv  — irradiance (W/m²), 96 rows × 1 col
+            data/forecast_scenarios/load_{scenario_name}.csv   — load kW,    96 rows × 21 cols
+        """
         try:
-            if scenario_name:
-                scenario_folder = os.path.join(data_path, "forecast_scenarios")
-                solar_file = os.path.join(scenario_folder, f"solar_{scenario_name}.csv")
-                load_file  = os.path.join(scenario_folder, f"load_{scenario_name}.csv")
-                if not os.path.exists(solar_file):
-                    raise FileNotFoundError(f"Scenario file not found: {solar_file}")
-                if not os.path.exists(load_file):
-                    raise FileNotFoundError(f"Scenario file not found: {load_file}")
-                print(f"[INFO] Loading Scenario: {scenario_name}")
-                self.solar_df = pd.read_csv(solar_file)
-                self.load_df  = pd.read_csv(load_file)
-            else:
-                solar_file = os.path.join(data_path, "solar_forecast_formatted.csv")
-                load_file  = os.path.join(data_path, "load_forecast.csv")
-                print(f"[INFO] Loading default data files")
-                self.solar_df = pd.read_csv(solar_file)
-                self.load_df  = pd.read_csv(load_file)
+            if not scenario_name:
+                raise ValueError(
+                    "scenario_name is required. "
+                    "Pass the date or scenario label, e.g. scenario_name='Forecast_21_2024_12_17'. "
+                    "Files must exist as:\n"
+                    "  data/forecast_scenarios/solar_{scenario_name}.csv\n"
+                    "  data/forecast_scenarios/load_{scenario_name}.csv"
+                )
+
+            scenario_folder = os.path.join(data_path, "forecast_scenarios")
+            solar_file = os.path.join(scenario_folder, f"solar_{scenario_name}.csv")
+            load_file  = os.path.join(scenario_folder, f"load_{scenario_name}.csv")
+
+            if not os.path.exists(solar_file):
+                raise FileNotFoundError(f"Scenario solar file not found: {solar_file}")
+            if not os.path.exists(load_file):
+                raise FileNotFoundError(f"Scenario load file not found: {load_file}")
+
+            print(f"[INFO] Loading Scenario: {scenario_name}")
+            self.solar_df = pd.read_csv(solar_file)
+            self.load_df  = pd.read_csv(load_file)
 
             for df_name, df in [("solar", self.solar_df), ("load", self.load_df)]:
                 ts_cols = [c for c in df.columns if c.lower() in ['timestamp','time','date','datetime']]
@@ -269,10 +294,14 @@ class UrbanVPPEnv(gym.Env):
                     df = df.iloc[:, :21]
                 elif df.shape[1] < 21:
                     if df_name == "solar" and df.shape[1] == 1:
-                        # Single irradiance column (W/m²) → convert to per-node kW and broadcast to 21 nodes
-                        # Factor calibrated to ~4.3 kW peak per node at STC (1000 W/m²)
-                        power = df.iloc[:, 0].values * 0.0043
-                        df = pd.DataFrame(np.tile(power.reshape(-1, 1), 21),
+                        # Single irradiance column (W/m²) → per-node kW using each
+                        # node's actual panel capacity at STC (1000 W/m²).
+                        irradiance = df.iloc[:, 0].values  # W/m²
+                        node_power = np.zeros((len(irradiance), 21), dtype=np.float32)
+                        for node_idx, kw_peak in self.solar_panel_kw_peak.items():
+                            # Power (kW) = irradiance (W/m²) / 1000 * panel_kW_peak
+                            node_power[:, node_idx] = irradiance / 1000.0 * kw_peak
+                        df = pd.DataFrame(node_power,
                                           columns=[f"Node{i+1}" for i in range(21)])
                     else:
                         raise ValueError(f"{df_name} has only {df.shape[1]} columns, need 21")
@@ -296,12 +325,12 @@ class UrbanVPPEnv(gym.Env):
                 n_reps = int(np.ceil(min_rows / len(self.solar_df)))
                 self.solar_df = pd.concat([self.solar_df] * n_reps, ignore_index=True).iloc[:min_rows]
                 self.load_df  = pd.concat([self.load_df]  * n_reps, ignore_index=True).iloc[:min_rows]
-                print(f"[INFO] Short data tiled ×{n_reps} → {len(self.solar_df)} rows for episode diversity.")
+                print(f"[INFO] Short data tiled x{n_reps} -> {len(self.solar_df)} rows for episode diversity.")
 
             print(f"[OK] Data Loaded! Scenario: {scenario_name or 'default'}")
 
         except FileNotFoundError as e:
-            print(f"[WARNING] {e} — using dummy data.")
+            print(f"[WARNING] {e} -- using dummy data.")
             self.solar_df = pd.DataFrame(np.random.rand(1000, 21).astype(np.float32) * 5.0)
             self.load_df  = pd.DataFrame(np.random.rand(1000, 21).astype(np.float32) * 3.0)
 
@@ -327,8 +356,14 @@ class UrbanVPPEnv(gym.Env):
         elif self.default_start_index is not None:
             self.start_idx = self.default_start_index
         else:
-            max_start = len(self.solar_df) - self.max_steps
-            self.start_idx = np.random.randint(0, max_start) if max_start > 0 else 0
+            # Always start at midnight (00:00) of a randomly chosen day.
+            # Each day is 96 steps (24h × 4 steps/h). Starting at a day
+            # boundary means SoC=0.2 is always physically correct: batteries
+            # were fully discharged during the previous day's peak (18:30–22:30)
+            # and have not yet begun off-peak charging.
+            n_full_days = (len(self.solar_df) - self.max_steps) // self.max_steps
+            day_idx = np.random.randint(0, max(1, n_full_days))
+            self.start_idx = day_idx * self.max_steps
 
         self.solar_episode = self.solar_df.iloc[
             self.start_idx:self.start_idx + self.max_steps

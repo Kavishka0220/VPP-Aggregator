@@ -568,7 +568,8 @@ results_df = pd.DataFrame({
     "Instant_Reward": history["rewards"]
 })
 
-csv_file_path = f"{SCENARIO_FOLDER}/detailed_simulation_results.csv"
+_scenario_suffix = f"_{SCENARIO_NAME}" if SCENARIO_NAME else ""
+csv_file_path = f"{SCENARIO_FOLDER}/detailed_simulation_results{_scenario_suffix}.csv"
 results_df.to_csv(csv_file_path, index=False)
 print(f"[OK] Saved detailed results to '{csv_file_path}'")
 

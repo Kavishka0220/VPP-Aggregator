@@ -417,14 +417,14 @@ class UrbanVPPEnv(gym.Env):
         solar surplus alone cannot fill the gap before 18:30.
         This unlocks limited daytime grid-charging for pre-peak readiness.
         """
-        if not (10.0 <= hour < 18.5):
+        if not (8.0 <= hour < 18.5):
             return False
         bess_soc = self.soc[2]
         if bess_soc >= 0.8:
             return False  # already full
         needed_kwh = (0.8 - bess_soc) * self.bess_cap
         surplus_kwh = self._estimate_daytime_solar_surplus_kwh(hour)
-        return surplus_kwh < needed_kwh * 0.9  # solar won't cover it
+        return surplus_kwh < needed_kwh * 1.1  # solar forecast must comfortably exceed need
 
     # ------------------------------------------------------------------
     # HOME BATTERY RULE-BASED CONTROLLER
@@ -650,20 +650,26 @@ class UrbanVPPEnv(gym.Env):
                     # but CAN choose to charge less (desired_power is negative).
                     desired_power = max(desired_power, -solar_allocations[i])
                 elif self._is_daytime_topup_needed(hour):
+                    # Allow full power grid top-up so BESS can reach 0.8 SoC
+                    # before peak even when solar is insufficient.
                     max_topup = self._max_charge_power_from_headroom(
-                        self.soc[i], cap, p_max * 0.75
+                        self.soc[i], cap, p_max
                     )
                     desired_power = max(desired_power, -max_topup)
                 else:
-                    # No solar surplus and no top-up needed → block grid-charging.
+                    # Solar forecast is expected to cover the need — block grid
+                    # charging now to avoid paying for grid power unnecessarily.
                     desired_power = 0.0
 
             # ── BESS HARD SOLAR BIAS ──────────────────────────────────────
             # During daytime, if feeder has surplus > 2 kW and BESS has room,
             # force at least 50% of possible solar charging regardless of action.
+            # VOLTAGE GUARD: skip the bias if node voltage is already sagging
+            # (< 0.97 p.u.) — aggressive charging would worsen the sag.
             if is_bess and 5.5 <= hour < 18.5 and self.soc[i] < 0.8:
+                node_v_bias = self.voltages[node_idx]
                 feeder_surplus_now = max(0.0, net_solar_surplus)
-                if feeder_surplus_now > 2.0:
+                if feeder_surplus_now > 2.0 and node_v_bias >= 0.97:
                     min_charge_kw = min(
                         feeder_surplus_now,
                         self._max_charge_power_from_headroom(self.soc[i], cap, p_max)
@@ -699,17 +705,25 @@ class UrbanVPPEnv(gym.Env):
                         print(f"[VOLT_DISCHARGE_LIMIT] Hour {hour:.1f}: {label} node "
                               f"{node_v:.4f} p.u. → discharge ×{voltage_factor:.2f}")
 
-            # ── VOLTAGE-AWARE CHARGE LIMITING (BESS only) ─────────────────
-            # Heavy charging draws current and sags feeder voltages.
-            # Home batteries excluded: charging helps undervoltage, not hurts.
-            if final_power < 0 and is_bess:
+            # ── VOLTAGE-AWARE CHARGE LIMITING (BESS + home batteries) ──────
+            # All charging draws current from the feeder and sags node voltages.
+            # Threshold is time-aware:
+            #   Daytime  (05:30-18:30): 0.97 p.u. — solar causes bigger swings;
+            #     proactive throttle prevents daytime undervoltage violations.
+            #   Off-peak (00:15-05:30): 0.95 p.u. — no solar, feeder voltages are
+            #     naturally ~0.95-0.96 at night; using 0.97 would throttle to
+            #     33-67% power all night and prevent BESS reaching SoC 0.8 by dawn.
+            if final_power < 0:
                 node_v = self.voltages[node_idx]
-                if node_v < 0.95:
-                    voltage_factor = max(0.0, (node_v - 0.94) / (0.95 - 0.94))
+                volt_threshold = 0.97 if 5.5 <= hour < 18.5 else 0.95
+                if node_v < volt_threshold:
+                    voltage_factor = max(0.0, (node_v - 0.94) / (volt_threshold - 0.94))
                     final_power = final_power * voltage_factor
                     if self.verbose and voltage_factor < 1.0:
-                        print(f"[VOLT_CHARGE_LIMIT] Hour {hour:.1f}: BESS node "
-                              f"{node_v:.4f} p.u. → charge ×{voltage_factor:.2f}")
+                        label = "BESS" if is_bess else f"HOME{node_idx}"
+                        print(f"[VOLT_CHARGE_LIMIT] Hour {hour:.1f}: {label} node "
+                              f"{node_v:.4f} p.u. -> charge x{voltage_factor:.2f}")
+
 
             # ── UPDATE SOC ────────────────────────────────────────────────
             eff = 0.95

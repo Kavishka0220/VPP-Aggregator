@@ -36,10 +36,11 @@ def main():
     #   "Next_Day_Forecast_21_nodes" : Load dip 00:00-02:00 (21-node version)
     #   "night_peak"               : Extra evening/night load bump
     #   "solar_unavailable_day"    : Solar set to 0 all day
+    #   "Forecast_21_2024_12_17"
 
     # Set to a scenario name (e.g., "cloudy_day") to train on that specific scenario.
     # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
-    scenario_name = "Forecast_21_2024_12_14"  # Change to any scenario above
+    scenario_name = "Forecast_21_2024_12_17"  # Change to any scenario above
 
 
     # Get script directory to ensure outputs save in RL_agent folder
@@ -164,7 +165,7 @@ def main():
     callbacks = CallbackList([checkpoint_callback, eval_callback])
     
     # 4. Start Training
-    total_timesteps = 500_000  # Updated to 500k steps for stable convergence
+    total_timesteps = 1000_000  # Updated to 500k steps for stable convergence
     print("[START] PPO Training...")
     print(f"   Target: {total_timesteps:,} Timesteps")
     print(f"   Checkpoints every: {checkpoint_callback.save_freq:,} steps")

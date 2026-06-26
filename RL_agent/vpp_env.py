@@ -21,10 +21,13 @@ class UrbanVPPEnv(gym.Env):
 
     CHARGING PRIORITY (in order):
     ─────────────────────────────
-    1. SOLAR SURPLUS  → charge BESS first, then home batteries, export remainder.
-    2. OFF-PEAK GRID  → charge only the deficit that solar cannot cover.
-                        BLOCKED during 22:30–00:15 (late-night no-charge window).
-    3. DAYTIME TOP-UP → if solar + off-peak still leaves BESS below ~0.75 SoC
+    1. HOME SOLAR SURPLUS  → home batteries charge from their own local PV surplus.
+    2. FEEDER SOLAR SURPLUS → if no local surplus, home batteries charge from the
+                               feeder-wide shared solar surplus (split equally).
+       BESS also charges from feeder surplus (BESS first, then home batteries).
+    3. OFF-PEAK GRID  → charge only when no solar surplus is available (home
+                        batteries and BESS). BLOCKED during 22:30–00:15.
+    4. DAYTIME TOP-UP → if solar + off-peak still leaves BESS below ~0.75 SoC
                         by 16:00, allow limited daytime grid charging so batteries
                         are full before peak starts at 18:30.
 
@@ -73,16 +76,16 @@ class UrbanVPPEnv(gym.Env):
     R_ECONOMIC_WEIGHT        = 0.6
 
     # Daytime solar
-    R_SOLAR_CHARGE_BONUS     = 35.0    # per kW of solar charging (any battery)
-    R_BESS_SOLAR_CHARGE      = 40.0    # extra per kW of BESS solar charging (priority)
-    R_HOME_SOLAR_CHARGE      = 25.0    # per kW of home-battery solar charging
-    R_SOLAR_WASTE_PENALTY    = -40.0   # per kW of wasted solar (batteries not full)
+    R_SOLAR_CHARGE_BONUS     = 20.0    # per kW of solar charging (any battery)
+    R_BESS_SOLAR_CHARGE      = 20.0    # extra per kW of BESS solar charging (priority)
+    R_HOME_SOLAR_CHARGE      = 15.0    # per kW of home-battery solar charging
+    R_SOLAR_WASTE_PENALTY    = -15.0   # per kW of wasted solar (batteries not full)
     R_BESS_DAYTIME_DISCHARGE = -30.0   # per kW inappropriate BESS discharge outside peak
 
     # Pre-peak readiness  (NEW)
     # Reward BESS being well-charged during the 2h window before peak (16:30–18:30)
-    R_PRE_PEAK_READY_BONUS   = 5.0     # per 0.01 SoC above floor at 16:30–18:30
-    R_PRE_PEAK_FLOOR         = 0.50    # SoC floor that earns this bonus
+    R_PRE_PEAK_READY_BONUS   = 4.0     # per 0.01 SoC above floor at 05:30–18:30
+    R_PRE_PEAK_FLOOR         = 0.20    # SoC floor that earns this bonus
 
     # Peak hours
     R_PEAK_DISCHARGE_BONUS   = 40.0    # per kW of peak discharge
@@ -139,8 +142,8 @@ class UrbanVPPEnv(gym.Env):
     R_CONVERGENCE_PENALTY    = -5.0
     # =================================================================
 
-    # Guidance blend: 0.65 = 65% rule guidance + 35% agent freedom
-    GUIDANCE_ALPHA = 0.65
+    # Guidance blend: 0.4 = 40% rule guidance + 60% agent freedom
+    GUIDANCE_ALPHA = 0.4
 
     # Tiling for episode diversity
     N_TILE_DAYS = 30
@@ -197,10 +200,11 @@ class UrbanVPPEnv(gym.Env):
         self._peak_discharge_powers = []   # list of total discharge kW per step
 
         # Action space
-        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(3,), dtype=np.float32)
+        # BESS only — home batteries are rule-based
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
 
-        # Observation space: 1(Solar) + 21(Loads) + 22(Voltages) + 3(SoCs) + 4(Time) = 51
-        self.obs_size = 51
+        # Observation space: 1(Solar) + 21(Loads) + 22(Voltages) + 3(SoCs) + 4(Time) + 1(FeederSurplus) = 52
+        self.obs_size = 52
 
         self.OBS_SOLAR_MAX  = 10.0
         self.OBS_LOAD_MAX   = 10.0
@@ -413,145 +417,138 @@ class UrbanVPPEnv(gym.Env):
         solar surplus alone cannot fill the gap before 18:30.
         This unlocks limited daytime grid-charging for pre-peak readiness.
         """
-        if not (16.0 <= hour < 18.5):
+        if not (10.0 <= hour < 18.5):
             return False
         bess_soc = self.soc[2]
-        if bess_soc >= self.R_PRE_PEAK_FLOOR:
-            return False  # already ready
-        needed_kwh = (self.R_PRE_PEAK_FLOOR - bess_soc) * self.bess_cap
+        if bess_soc >= 0.8:
+            return False  # already full
+        needed_kwh = (0.8 - bess_soc) * self.bess_cap
         surplus_kwh = self._estimate_daytime_solar_surplus_kwh(hour)
         return surplus_kwh < needed_kwh * 0.9  # solar won't cover it
 
     # ------------------------------------------------------------------
-    # SOFT GUIDANCE
+    # HOME BATTERY RULE-BASED CONTROLLER
     # ------------------------------------------------------------------
 
-    def _apply_soft_guidance(self, action, hour, net_solar_surplus, net_demand,
+    def _home_battery_rules(self, hour, solar_step, load_step):
+        """
+        Fully rule-based home battery controller.
+        Charging priority (daytime):
+          1. Home's own local solar surplus.
+          2. Feeder-wide solar surplus (shared equally) if no local surplus.
+          3. Off-peak grid charging only when neither solar source is available.
+        Peak     → discharge to serve local load.
+        No-charge window → idle.
+        Returns desired powers in kW (negative=charge, positive=discharge).
+        """
+        powers = np.zeros(len(self.home_batt_indices), dtype=np.float32)
+
+        if self._is_no_charge_window(hour):
+            return powers
+
+        if 5.5 <= hour < 18.5:
+            feeder_surplus = max(0.0, float(np.sum(solar_step[:21])) - float(np.sum(load_step[:21])))
+            n_home = len(self.home_batt_indices)
+            for i, node_idx in enumerate(self.home_batt_indices):
+                if self.soc[i] >= 0.8:
+                    continue
+                local_surplus = max(0.0, float(solar_step[node_idx]) - float(load_step[node_idx]))
+                if local_surplus > 0:
+                    # Priority 1: home's own solar surplus
+                    available_surplus = local_surplus
+                elif feeder_surplus > 0:
+                    # Priority 2: share of feeder-wide surplus
+                    available_surplus = feeder_surplus / n_home
+                else:
+                    available_surplus = 0.0
+
+                if available_surplus > 0:
+                    max_charge = self._max_charge_power_from_headroom(
+                        self.soc[i], self.home_batt_cap, self.home_batt_power)
+                    powers[i] = -min(available_surplus, max_charge)
+
+        elif hour < 5.5:
+            # Priority 3: off-peak grid charging when no solar surplus is available
+            for i in range(len(self.home_batt_indices)):
+                if self.soc[i] < 0.8:
+                    max_charge = self._max_charge_power_from_headroom(
+                        self.soc[i], self.home_batt_cap, self.home_batt_power)
+                    powers[i] = -max_charge
+
+        elif 18.5 <= hour < 22.5:
+            # Discharge during peak to serve local demand
+            for i in range(len(self.home_batt_indices)):
+                max_disch = self._max_discharge_power_from_soc(
+                    self.soc[i], self.home_batt_cap, self.home_batt_power)
+                powers[i] = max_disch
+
+        return powers
+
+    # ------------------------------------------------------------------
+    # BESS SOFT GUIDANCE (RL-controlled)
+    # ------------------------------------------------------------------
+
+    def _apply_soft_guidance(self, bess_action_raw, hour, net_solar_surplus, net_demand,
                               bess_soc, peak_import_target):
         """
-        Soft action guidance (GUIDANCE_ALPHA blend with raw agent action).
-
-        Strategy summary
-        ────────────────
-        SOLAR hours (05:30–18:30):
-          • BESS gets first crack at solar surplus.
-          • Home batteries get the remainder.
-          • No grid charging (except daytime top-up after 16:00 if needed).
-          • No BESS discharge unless it's peak time.
-
-        OFF-PEAK (00:15–05:30):
-          • Charge BESS from grid only for the deficit solar cannot cover.
-          • Home batteries idle (solar will cover them during daytime).
-          • Hard block 22:30–00:15 (no-charge window).
-
-        PEAK (18:30–22:30):
-          • Full discharge of BESS + home batteries.
-          • Shaped to peak-import target (flat profile).
+        BESS-only soft guidance. Returns scalar action in [-1, 1].
+        Priority: solar charging > off-peak grid charging > peak discharge.
         """
-        bess_idx = 2  # index into action / storage_map
-
-        # ── NO-CHARGE WINDOW (22:30–00:15) ──────────────────────────────
-        # Hard-block: no blending — agent must stay idle in this window.
         if self._is_no_charge_window(hour):
-            return np.zeros(self.n_storage_units, dtype=np.float32)
+            return 0.0
 
-        expected_solar_surplus = self._estimate_daytime_solar_surplus_kwh(hour)
-
-        # Helper: blend guidance signal with the agent's raw action.
-        # GUIDANCE_ALPHA = 1.0 → pure rule (old behaviour, causes flat reward).
-        # GUIDANCE_ALPHA = 0.0 → pure agent.
-        # Default 0.6 keeps the operation broadly correct while giving the
-        # RL agent 40% freedom to discover further optimisations.
         def blend(guidance_val, agent_val):
             return self.GUIDANCE_ALPHA * guidance_val + (1.0 - self.GUIDANCE_ALPHA) * agent_val
 
-        action_modified = action.copy()
-
-        # ─────────────────────────────────────────────────────────────────
-        # A. DAYTIME (05:30–18:30)
-        # ─────────────────────────────────────────────────────────────────
+        # DAYTIME (05:30–18:30): charge from solar or pre-peak top-up
         if 5.5 <= hour < 18.5:
-
-            # BESS: charge from solar surplus first; allow pre-peak grid top-up
             if net_solar_surplus > 0 and bess_soc < 0.8:
                 charge_intensity = min(1.0, net_solar_surplus / self.bess_power)
-                action_modified[bess_idx] = blend(-charge_intensity, action[bess_idx])
+                return blend(-charge_intensity, bess_action_raw)
             elif self._is_daytime_topup_needed(hour):
-                gap = max(0.0, self.R_PRE_PEAK_FLOOR - bess_soc)
-                topup_power = min(self.bess_power * 0.5,
-                                  gap * self.bess_cap / (0.25 * 0.95))
-                guidance = -min(1.0, topup_power / self.bess_power)
-                action_modified[bess_idx] = blend(guidance, action[bess_idx])
+                # Urgency-based top-up: compute required power based on hours remaining
+                hours_left = max(0.25, 18.5 - hour)
+                required_power = max(
+                    0.0,
+                    ((0.8 - bess_soc) * self.bess_cap) / (hours_left * 0.95)
+                )
+                required_power = min(required_power, self.bess_power * 0.5)
+                topup_frac = min(1.0, required_power / self.bess_power)
+                return blend(-topup_frac, bess_action_raw)
             else:
-                action_modified[bess_idx] = blend(0.0, action[bess_idx])
+                return blend(0.0, bess_action_raw)
 
-            # Home batteries: solar remainder after BESS
-            bess_absorb = 0.0
-            if net_solar_surplus > 0 and bess_soc < 0.8:
-                bess_absorb = min(net_solar_surplus, self.bess_power)
-            leftover = max(0.0, net_solar_surplus - bess_absorb)
-
-            for hb_idx in range(len(self.home_batt_indices)):
-                if self.soc[hb_idx] < 0.8 and leftover > 0:
-                    share = min(leftover / max(1, len(self.home_batt_indices) - hb_idx),
-                                self.home_batt_power)
-                    guidance = -min(1.0, share / self.home_batt_power)
-                    action_modified[hb_idx] = blend(guidance, action[hb_idx])
-                    leftover -= share
-                else:
-                    action_modified[hb_idx] = blend(0.0, action[hb_idx])
-
-        # ─────────────────────────────────────────────────────────────────
-        # B. OFF-PEAK (00:15–05:30)
-        # ─────────────────────────────────────────────────────────────────
+        # OFF-PEAK (00:15–05:30): compute required power to reach SoC 0.8 by 05:30
         elif hour < 5.5:
             if bess_soc < 0.8:
-                deficit_kwh = (0.8 - bess_soc) * self.bess_cap
-                if expected_solar_surplus >= deficit_kwh * 0.9:
-                    target_soc  = min(0.3, bess_soc + 0.05)
-                    target_kwh  = max(0.0, (target_soc - bess_soc) * self.bess_cap)
-                    charge_frac = min(1.0, target_kwh / max(deficit_kwh, 1e-3))
-                    action_modified[bess_idx] = blend(-charge_frac, action[bess_idx])
-                else:
-                    target_soc  = 0.5
-                    target_kwh  = max(0.0, (target_soc - bess_soc) * self.bess_cap)
-                    charge_frac = min(1.0, target_kwh / max(deficit_kwh, 1e-3))
-                    action_modified[bess_idx] = blend(-charge_frac, action[bess_idx])
-            else:
-                action_modified[bess_idx] = blend(0.0, action[bess_idx])
+                remaining_energy = max(0.0, (0.8 - bess_soc) * self.bess_cap)
+                remaining_offpeak_hours = max(0.25, 5.5 - hour)
+                required_power = min(remaining_energy / remaining_offpeak_hours, self.bess_power)
+                charge_frac = min(1.0, required_power / self.bess_power)
+                guided = -charge_frac
+                blended = blend(guided, bess_action_raw)
+                # Guidance is a floor: agent can charge MORE aggressively but never less.
+                # Prevents agent positive actions from diluting the required charge rate.
+                return min(blended, guided)
+            return blend(0.0, bess_action_raw)
 
-            for hb_idx in range(len(self.home_batt_indices)):
-                action_modified[hb_idx] = blend(0.0, action[hb_idx])
-
-        # ─────────────────────────────────────────────────────────────────
-        # C. PEAK (18:30–22:30)
-        # ─────────────────────────────────────────────────────────────────
+        # PEAK (18:30–22:30): demand-driven peak shaving
         elif 18.5 <= hour < 22.5:
-            steps_remaining = max(1, int((22.5 - hour) * 4))
-
             bess_deliverable = max(0.0, (bess_soc - 0.2) * self.bess_cap * 0.95)
             if bess_deliverable > 0:
-                avg_power = bess_deliverable / (steps_remaining * 0.25)
-                if peak_import_target is not None and net_demand > 0:
-                    shaped = np.clip(net_demand - peak_import_target, 0.0, self.bess_power)
-                    target_power = max(shaped, avg_power)
+                current_import = net_demand  # already max(0, total_load - total_solar)
+                if peak_import_target is not None:
+                    needed_discharge = max(0.0, current_import - peak_import_target)
                 else:
-                    target_power = avg_power
-                target_power = min(target_power, self.bess_power)
-                action_modified[bess_idx] = blend(target_power / self.bess_power, action[bess_idx])
-            else:
-                action_modified[bess_idx] = blend(0.0, action[bess_idx])
+                    needed_discharge = current_import
+                max_discharge = self._max_discharge_power_from_soc(
+                    bess_soc, self.bess_cap, self.bess_power
+                )
+                target_power = min(needed_discharge, max_discharge)
+                return blend(min(target_power, self.bess_power) / self.bess_power, bess_action_raw)
+            return blend(0.0, bess_action_raw)
 
-            for hb_idx in range(len(self.home_batt_indices)):
-                hb_del = max(0.0, (self.soc[hb_idx] - 0.2) * self.home_batt_cap * 0.95)
-                if hb_del > 0:
-                    avg_hb = hb_del / (steps_remaining * 0.25)
-                    target_power = min(avg_hb, self.home_batt_power)
-                    action_modified[hb_idx] = blend(target_power / self.home_batt_power, action[hb_idx])
-                else:
-                    action_modified[hb_idx] = blend(0.0, action[hb_idx])
-
-        return action_modified
+        return float(bess_action_raw)
 
     # ------------------------------------------------------------------
     # PHYSICS CONSTRAINTS
@@ -617,8 +614,12 @@ class UrbanVPPEnv(gym.Env):
                 desired_power = 0.0
 
             # ── HARD CONSTRAINT 3: Discharge only during peak ─────────────
+            # Exception: BESS may discharge during daytime for undervoltage support
             if desired_power > 0 and not (18.5 <= hour < 22.5):
-                desired_power = 0.0
+                if is_bess and np.min(self.voltages[self.critical_nodes]) < 0.94:
+                    pass  # Allow BESS discharge to raise sagging voltage
+                else:
+                    desired_power = 0.0
 
             # ── HARD CONSTRAINT 4: No charging during peak ────────────────
             if desired_power < 0 and 18.5 <= hour < 22.5:
@@ -650,20 +651,32 @@ class UrbanVPPEnv(gym.Env):
                     desired_power = max(desired_power, -solar_allocations[i])
                 elif self._is_daytime_topup_needed(hour):
                     max_topup = self._max_charge_power_from_headroom(
-                        self.soc[i], cap, p_max * 0.5
+                        self.soc[i], cap, p_max * 0.75
                     )
                     desired_power = max(desired_power, -max_topup)
                 else:
                     # No solar surplus and no top-up needed → block grid-charging.
                     desired_power = 0.0
 
-            # ── HARD CONSTRAINT 8: Home battery daytime solar-only ─────────
-            # Same cap-not-force pattern as CONSTRAINT 7.
+            # ── BESS HARD SOLAR BIAS ──────────────────────────────────────
+            # During daytime, if feeder has surplus > 2 kW and BESS has room,
+            # force at least 50% of possible solar charging regardless of action.
+            if is_bess and 5.5 <= hour < 18.5 and self.soc[i] < 0.8:
+                feeder_surplus_now = max(0.0, net_solar_surplus)
+                if feeder_surplus_now > 2.0:
+                    min_charge_kw = min(
+                        feeder_surplus_now,
+                        self._max_charge_power_from_headroom(self.soc[i], cap, p_max)
+                    )
+                    # Push desired_power more negative if needed (more charging)
+                    desired_power = min(desired_power, -0.5 * min_charge_kw)
+
+            # ── HARD CONSTRAINT 8: Home battery daytime charging ──────────
+            # Rules already enforce local-solar-only; just enforce SoC headroom.
             if not is_bess and desired_power < 0 and 5.5 <= hour < 18.5:
-                if i in solar_allocations:
-                    desired_power = max(desired_power, -solar_allocations[i])
-                else:
-                    desired_power = 0.0
+                max_charge = self._max_charge_power_from_headroom(
+                    self.soc[i], self.home_batt_cap, self.home_batt_power)
+                desired_power = max(desired_power, -max_charge)
 
             # ── HARD CONSTRAINT 9: Discharge ≤ remaining demand ───────────
             if desired_power > 0:
@@ -686,16 +699,16 @@ class UrbanVPPEnv(gym.Env):
                         print(f"[VOLT_DISCHARGE_LIMIT] Hour {hour:.1f}: {label} node "
                               f"{node_v:.4f} p.u. → discharge ×{voltage_factor:.2f}")
 
-            # ── VOLTAGE-AWARE CHARGE LIMITING (BESS + home batteries) ─────
+            # ── VOLTAGE-AWARE CHARGE LIMITING (BESS only) ─────────────────
             # Heavy charging draws current and sags feeder voltages.
-            if final_power < 0:
+            # Home batteries excluded: charging helps undervoltage, not hurts.
+            if final_power < 0 and is_bess:
                 node_v = self.voltages[node_idx]
                 if node_v < 0.95:
                     voltage_factor = max(0.0, (node_v - 0.94) / (0.95 - 0.94))
                     final_power = final_power * voltage_factor
                     if self.verbose and voltage_factor < 1.0:
-                        label = "BESS" if is_bess else f"HOME{node_idx}"
-                        print(f"[VOLT_CHARGE_LIMIT] Hour {hour:.1f}: {label} node "
+                        print(f"[VOLT_CHARGE_LIMIT] Hour {hour:.1f}: BESS node "
                               f"{node_v:.4f} p.u. → charge ×{voltage_factor:.2f}")
 
             # ── UPDATE SOC ────────────────────────────────────────────────
@@ -874,13 +887,16 @@ class UrbanVPPEnv(gym.Env):
                 bess_disc = np.maximum(0.0, self.node_battery_power_kw[self.bess_index])
                 daytime_solar_bonus += self.R_BESS_DAYTIME_DISCHARGE * bess_disc
 
-        # ── B. PRE-PEAK READINESS BONUS (16:30–18:30) ─────────────────
+        # ── B. PRE-PEAK READINESS BONUS (05:30–18:30) ─────────────────────────
         pre_peak_bonus = 0.0
-        if 16.5 <= hour < 18.5:
-            bess_soc = self.soc[2]
-            if bess_soc > self.R_PRE_PEAK_FLOOR:
-                # Scale linearly: bonus proportional to how far above floor
-                pre_peak_bonus = self.R_PRE_PEAK_READY_BONUS * (bess_soc - self.R_PRE_PEAK_FLOOR) * 100.0
+        bess_soc = self.soc[2]
+        if 5.5 <= hour < 18.5:
+            soc_above_floor = max(0.0, bess_soc - self.R_PRE_PEAK_FLOOR)
+            pre_peak_bonus = self.R_PRE_PEAK_READY_BONUS * soc_above_floor * 100.0
+        elif 18.5 <= hour < 18.75:
+            # One-time bonus at peak start: strong signal for how full BESS is
+            soc_progress = max(0.0, bess_soc - 0.2) / 0.6
+            pre_peak_bonus = self.R_PRE_PEAK_READY_BONUS * soc_progress * 100.0
 
         # ── C. PEAK BONUSES ───────────────────────────────────────────
         peak_bonus          = 0.0
@@ -916,6 +932,11 @@ class UrbanVPPEnv(gym.Env):
                     peak_smooth_bonus = self.R_PEAK_SMOOTH_BONUS * (5.0 - deviation)
                 else:
                     peak_smooth_bonus = -self.R_PEAK_SMOOTH_BONUS * (deviation - 5.0)
+
+            # Near-end-of-peak: penalise remaining SoC to encourage full discharge
+            if 22.0 <= hour < 22.5:
+                remaining_soc = max(0.0, self.soc[2] - 0.2)
+                peak_bonus += -100.0 * remaining_soc
 
         # ── D. OFF-PEAK BONUSES ───────────────────────────────────────
         offpeak_bonus = 0.0
@@ -964,7 +985,7 @@ class UrbanVPPEnv(gym.Env):
 
         # ── E. DAYTIME TOP-UP BONUS ────────────────────────────────────
         daytime_topup_bonus = 0.0
-        if 16.0 <= hour < 18.5:
+        if 14.0 <= hour < 18.5:
             bess_charge_pwr = self.node_battery_power_kw[self.bess_index]
             if bess_charge_pwr < 0 and self._is_daytime_topup_needed(hour):
                 daytime_topup_bonus = self.R_DAYTIME_TOPUP_BONUS * (-bess_charge_pwr)
@@ -1112,28 +1133,40 @@ class UrbanVPPEnv(gym.Env):
         peak_import_target      = self._compute_peak_import_target(hour)
         bess_soc                = self.soc[2]
 
-        # 2. SOFT GUIDANCE
-        action_modified = self._apply_soft_guidance(
-            action, hour, net_solar_surplus, net_demand, bess_soc, peak_import_target
+        # 2. HOME BATTERY RULE-BASED CONTROL
+        home_powers = self._home_battery_rules(
+            hour, self.solar_episode[self.current_step], self.load_episode[self.current_step]
         )
 
-        # 3. PHYSICS
+        # 3. BESS SOFT GUIDANCE (RL action[0])
+        bess_guided = self._apply_soft_guidance(
+            float(action[0]), hour, net_solar_surplus, net_demand, bess_soc, peak_import_target
+        )
+
+        # Combine into 3-element vector for physics (normalised to [-1, 1])
+        action_modified = np.array([
+            home_powers[0] / self.home_batt_power,
+            home_powers[1] / self.home_batt_power,
+            bess_guided
+        ], dtype=np.float32)
+
+        # 4. PHYSICS
         remaining_demand, remaining_solar_surplus, prev_batt_power_copy = \
             self._apply_physics_constraints(
                 action_modified, hour, net_solar_surplus,
                 remaining_solar_surplus, total_solar, total_load
             )
 
-        # 4. OPENDSS
+        # 5. OPENDSS
         converged = self._run_opendss(full_solar_profile, full_load_profile)
 
-        # 5. REWARD
+        # 6. REWARD
         reward, reward_info = self._compute_reward(
             hour, net_demand, net_solar_surplus, total_solar, total_load,
             prev_batt_power_copy, peak_import_target, converged, remaining_demand
         )
 
-        # 6. TRANSITION
+        # 7. TRANSITION
         self.current_step += 1
         terminated = (self.current_step >= self.max_steps)
         truncated  = False
@@ -1186,8 +1219,11 @@ class UrbanVPPEnv(gym.Env):
     def _get_obs(self):
         """51-value normalised observation vector."""
         if self.current_step < self.max_steps:
-            common_solar_raw = np.array([self.solar_episode[self.current_step][0]], dtype=np.float32)
-            load_step_raw    = self.load_episode[self.current_step]
+            # Mean solar across actual solar nodes (node 0 has no panel — never use index [0])
+            common_solar_raw = np.array([
+                np.mean(self.solar_episode[self.current_step][self.solar_indices])
+            ], dtype=np.float32)
+            load_step_raw = self.load_episode[self.current_step]
         else:
             common_solar_raw = np.array([0.0], dtype=np.float32)
             load_step_raw    = np.zeros(21, dtype=np.float32)
@@ -1204,12 +1240,23 @@ class UrbanVPPEnv(gym.Env):
             np.sin(day_angle),  np.cos(day_angle)
         ], dtype=np.float32)
 
+        # Feeder-wide surplus observation (52nd element)
+        # Helps PPO anticipate solar availability across the whole feeder.
+        if self.current_step < self.max_steps:
+            solar_raw_step = self.solar_episode[self.current_step]
+            load_raw_step  = self.load_episode[self.current_step]
+            feeder_surplus_raw = float(np.sum(solar_raw_step) - np.sum(load_raw_step))
+        else:
+            feeder_surplus_raw = 0.0
+        surplus_norm = np.array([feeder_surplus_raw / 100.0], dtype=np.float32)
+
         self.state = np.concatenate([
             common_solar_norm,
             load_step_norm,
             volt_norm,
             soc_norm,
-            date_time_feats
+            date_time_feats,
+            surplus_norm
         ]).astype(np.float32)
 
         return self.state

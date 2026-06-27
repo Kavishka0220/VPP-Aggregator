@@ -468,54 +468,72 @@ class UrbanVPPEnv(gym.Env):
     def _home_battery_rules(self, hour, solar_step, load_step):
         """
         Fully rule-based home battery controller.
-        Charging priority (daytime):
+        Charging priority (all non-peak, non-no-charge times):
           1. Home's own local solar surplus.
           2. Feeder-wide solar surplus (shared equally) if no local surplus.
-          3. Off-peak grid charging only when neither solar source is available.
-        Peak     → discharge to serve local load.
-        No-charge window → idle.
+          3. Off-peak grid charging (hour < 5.5) only when NO solar surplus
+             is available from either source.
+        Peak (18:30–22:30) → discharge to serve local load.
+        No-charge window (22:30–00:15) → idle.
         Returns desired powers in kW (negative=charge, positive=discharge).
         """
         powers = np.zeros(len(self.home_batt_indices), dtype=np.float32)
 
+        # ── No-charge window: idle ────────────────────────────────────
         if self._is_no_charge_window(hour):
             return powers
 
-        if 5.5 <= hour < 18.5:
-            feeder_surplus = max(0.0, float(np.sum(solar_step[:21])) - float(np.sum(load_step[:21])))
-            n_home = len(self.home_batt_indices)
-            for i, node_idx in enumerate(self.home_batt_indices):
-                if self.soc[i] >= 0.8:
-                    continue
-                local_surplus = max(0.0, float(solar_step[node_idx]) - float(load_step[node_idx]))
-                if local_surplus > 0:
-                    # Priority 1: home's own solar surplus
-                    available_surplus = local_surplus
-                elif feeder_surplus > 0:
-                    # Priority 2: share of feeder-wide surplus
-                    available_surplus = feeder_surplus / n_home
-                else:
-                    available_surplus = 0.0
-
-                if available_surplus > 0:
-                    max_charge = self._max_charge_power_from_headroom(
-                        self.soc[i], self.home_batt_cap, self.home_batt_power)
-                    powers[i] = -min(available_surplus, max_charge)
-
-        elif hour < 5.5:
-            # Priority 3: off-peak grid charging when no solar surplus is available
-            for i in range(len(self.home_batt_indices)):
-                if self.soc[i] < 0.8:
-                    max_charge = self._max_charge_power_from_headroom(
-                        self.soc[i], self.home_batt_cap, self.home_batt_power)
-                    powers[i] = -max_charge
-
-        elif 18.5 <= hour < 22.5:
-            # Discharge during peak to serve local demand
+        # ── Peak: discharge ───────────────────────────────────────────
+        if 18.5 <= hour < 22.5:
             for i in range(len(self.home_batt_indices)):
                 max_disch = self._max_discharge_power_from_soc(
                     self.soc[i], self.home_batt_cap, self.home_batt_power)
                 powers[i] = max_disch
+            return powers
+
+        # ── Non-peak charging with unified priority ───────────────────
+        # Applies to BOTH daytime (5:30–18:30) AND off-peak (00:15–5:30)
+        feeder_surplus = max(0.0, float(np.sum(solar_step[:21])) - float(np.sum(load_step[:21])))
+        n_home = len(self.home_batt_indices)
+
+        for i, node_idx in enumerate(self.home_batt_indices):
+            if self.soc[i] >= 0.8:
+                continue
+
+            local_surplus = max(0.0, float(solar_step[node_idx]) - float(load_step[node_idx]))
+            max_charge = self._max_charge_power_from_headroom(
+                self.soc[i], self.home_batt_cap, self.home_batt_power)
+
+            if local_surplus > 0:
+                # Priority 1: charge from home's own solar surplus
+                powers[i] = -min(local_surplus, max_charge)
+            elif feeder_surplus > 0:
+                # Priority 2: charge from feeder-wide solar surplus
+                powers[i] = -min(feeder_surplus / n_home, max_charge)
+            elif hour < 5.5:
+                # Priority 3: off-peak grid charging — only if this home battery's
+                # own local PV panel cannot fill it during the upcoming day.
+                # Check LOCAL node solar (not feeder-wide): nodes 3 and 5 each have
+                # a 5 kW panel that typically provides 20–30 kWh/day — easily enough
+                # to fill a 13.5 kWh battery (only 8.1 kWh needed from 0.2→0.8).
+                day_start_step = self.current_step + int((5.5 - hour) * 4)
+                day_end_step   = min(self.max_steps,
+                                     self.current_step + int((18.5 - hour) * 4))
+                if day_end_step > day_start_step:
+                    local_solar_kwh = float(np.sum(
+                        self.solar_episode[day_start_step:day_end_step, node_idx]
+                    )) * 0.25 * 0.95
+                    local_load_kwh  = float(np.sum(
+                        self.load_episode[day_start_step:day_end_step, node_idx]
+                    )) * 0.25
+                    local_surplus_kwh = max(0.0, local_solar_kwh - local_load_kwh)
+                else:
+                    local_surplus_kwh = 0.0
+                home_need_kwh = max(0.0, (0.8 - self.soc[i]) * self.home_batt_cap)
+                if local_surplus_kwh < home_need_kwh:
+                    # Local solar won't fully cover this battery; charge from grid
+                    powers[i] = -max_charge
+                # else: local panel will fill it — skip grid, leave room for solar
 
         return powers
 
@@ -553,19 +571,34 @@ class UrbanVPPEnv(gym.Env):
             else:
                 return blend(0.0, bess_action_raw)
 
-        # OFF-PEAK (00:15–05:30): compute required power to reach SoC 0.8 by 05:30
+        # OFF-PEAK (00:15–05:30): charge only the energy solar won't cover.
+        # Deducting the expected solar contribution avoids importing from the grid
+        # overnight only to export that same energy as solar surplus the next day
+        # (round-trip costs money: buy at 21 LKR, sell at 19 LKR).
         elif hour < 5.5:
             if bess_soc < 0.8:
-                remaining_energy = max(0.0, (0.8 - bess_soc) * self.bess_cap)
+                needed_kwh = max(0.0, (0.8 - bess_soc) * self.bess_cap)
+                expected_solar_kwh = self._estimate_daytime_solar_surplus_kwh(hour)
+                # Home batteries consume some solar surplus first
+                home_needs_kwh = sum(
+                    max(0.0, (0.8 - self.soc[j]) * self.home_batt_cap)
+                    for j in range(len(self.home_batt_indices))
+                )
+                bess_solar_available = max(0.0, expected_solar_kwh - home_needs_kwh)
+                deficit_kwh = max(0.0, needed_kwh - bess_solar_available)
+                if deficit_kwh <= 0:
+                    # Solar forecast fully covers BESS — hard block off-peak grid charge.
+                    # Return 0.0 (not blend) so the RL agent cannot bypass this.
+                    return 0.0
                 remaining_offpeak_hours = max(0.25, 5.5 - hour)
-                required_power = min(remaining_energy / remaining_offpeak_hours, self.bess_power)
-                charge_frac = min(1.0, required_power / self.bess_power)
-                guided = -charge_frac
+                max_grid_kw = min(deficit_kwh / remaining_offpeak_hours, self.bess_power)
+                ceiling_frac = min(1.0, max_grid_kw / self.bess_power)
+                guided = -ceiling_frac
                 blended = blend(guided, bess_action_raw)
-                # Guidance is a floor: agent can charge MORE aggressively but never less.
-                # Prevents agent positive actions from diluting the required charge rate.
-                return min(blended, guided)
-            return blend(0.0, bess_action_raw)
+                # Ceiling (not floor): agent cannot charge HARDER than the deficit allows.
+                # max() of two negatives returns the less-negative → less charging.
+                return max(blended, guided)
+            return 0.0
 
         # PEAK (18:30–22:30): demand-driven peak shaving
         elif 18.5 <= hour < 22.5:
@@ -695,6 +728,28 @@ class UrbanVPPEnv(gym.Env):
                     # Solar forecast is expected to cover the need — block grid
                     # charging now to avoid paying for grid power unnecessarily.
                     desired_power = 0.0
+
+            # ── HARD CONSTRAINT 7b: Cap BESS off-peak grid charging to deficit ──
+            # During off-peak (00:15–05:30), the BESS must not charge beyond what
+            # solar cannot cover the next day.  This prevents the round-trip loss of
+            # importing at 21 LKR/kWh overnight then exporting solar at 19 LKR/kWh.
+            # This is a hard constraint so the RL agent cannot bypass soft guidance.
+            if is_bess and desired_power < 0 and hour < 5.5:
+                needed_kwh = max(0.0, (0.8 - self.soc[i]) * cap)
+                expected_solar_kwh = self._estimate_daytime_solar_surplus_kwh(hour)
+                home_needs_kwh = sum(
+                    max(0.0, (0.8 - self.soc[j]) * self.home_batt_cap)
+                    for j in range(len(self.home_batt_indices))
+                )
+                bess_solar_available = max(0.0, expected_solar_kwh - home_needs_kwh)
+                deficit_kwh = max(0.0, needed_kwh - bess_solar_available)
+                if deficit_kwh <= 0:
+                    desired_power = 0.0  # solar covers all — block grid charging entirely
+                else:
+                    remaining_offpeak_hours = max(0.25, 5.5 - hour)
+                    max_grid_kw = min(deficit_kwh / remaining_offpeak_hours, p_max)
+                    # Ceiling: clamp so desired_power is no more negative than allowed
+                    desired_power = max(desired_power, -max_grid_kw)
 
             # ── BESS HARD SOLAR BIAS ──────────────────────────────────────
             # During daytime, if feeder has surplus > 2 kW and BESS has room,
@@ -1019,18 +1074,31 @@ class UrbanVPPEnv(gym.Env):
                 else:
                     offpeak_bonus = self.R_HOME_OFFPEAK_NEEDED * home_charge_pw
 
-            # BESS off-peak charging
+            # BESS off-peak charging — only reward the deficit that solar won't cover.
+            # Charging beyond what solar can supply during the day is wasteful
+            # (importing at 21 LKR and then exporting solar at 19 LKR = net loss).
             bess_soc_now    = self.soc[2]
             bess_charge_pwr = self.node_battery_power_kw[self.bess_index]
             if bess_charge_pwr < 0 and bess_soc_now < 0.8:
-                soc_headroom    = max(0.0, 0.8 - bess_soc_now)
-                headroom_factor = 1.0 + (soc_headroom / 0.6) * 1.5
-                offpeak_bonus  += -headroom_factor * self.R_OFFPEAK_BESS_HEADROOM * bess_charge_pwr
-
-                # Deficit bonus: if solar won't suffice, reward more urgently
                 expected_solar = self._estimate_daytime_solar_surplus_kwh(hour)
-                if expected_solar < (0.8 - bess_soc_now) * self.bess_cap:
-                    offpeak_bonus += -6.0 * bess_charge_pwr
+                home_needs_kwh = sum(
+                    max(0.0, (0.8 - self.soc[j]) * self.home_batt_cap)
+                    for j in range(len(self.home_batt_indices))
+                )
+                bess_solar_available = max(0.0, expected_solar - home_needs_kwh)
+                bess_deficit_kwh     = max(0.0, (0.8 - bess_soc_now) * self.bess_cap
+                                           - bess_solar_available)
+                if bess_deficit_kwh > 0:
+                    # Grid charge is needed for the deficit — reward proportionally
+                    soc_headroom    = max(0.0, 0.8 - bess_soc_now)
+                    headroom_factor = 1.0 + (soc_headroom / 0.6) * 1.5
+                    offpeak_bonus  += -headroom_factor * self.R_OFFPEAK_BESS_HEADROOM * bess_charge_pwr
+                    if bess_deficit_kwh > 0.1 * self.bess_cap:
+                        # Large deficit → extra urgency bonus
+                        offpeak_bonus += -6.0 * bess_charge_pwr
+                else:
+                    # Solar will fully cover BESS need — penalise unnecessary grid import
+                    offpeak_bonus += self.R_HOME_OFFPEAK_SOLAR_OK * bess_charge_pwr
 
         # ── E. DAYTIME TOP-UP BONUS ────────────────────────────────────
         daytime_topup_bonus = 0.0

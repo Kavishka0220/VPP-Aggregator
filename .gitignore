@@ -288,3 +288,15 @@ cycling_penalty_benchmarks.tex
 RL_agent/run_all.py
 /Dashboard
 results_plots/night_peak/1_power_exchange_detailed1.png
+/results_plots/Forecast_21_2024_12_11
+/results_plots/Forecast_21_2024_12_12
+/results_plots/Forecast_21_2024_12_13
+/results_plots/Forecast_21_2024_12_14
+/results_plots/Forecast_21_2024_12_15
+/results_plots/Forecast_21_2024_12_16
+/results_plots/Forecast_21_2024_12_17
+/results_plots/Forecast_21_2024_12_18
+/results_plots/peak_reduction_results
+RL_agent/calculate_peak_reduction.py
+/results_plots/Forecast_21_2024_12_11
+results_plots/training_reward.png

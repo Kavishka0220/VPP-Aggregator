@@ -128,7 +128,7 @@ def main():
         clip_range_vf=0.2,          # Value function clipping
         n_epochs=10,                # More epochs for better convergence
         n_steps=2048,               # Reduced from 2048: smaller rollout buffer saves RAM
-        batch_size=128,             # Larger batches → smoother per-step KL, fewer early stops
+        batch_size=64,             # Larger batches → smoother per-step KL, fewer early stops
         ent_coef=0.005,             # Lower exploration for smoother convergence
         vf_coef=0.5,                # Value function coefficient
         max_grad_norm=0.5,          # Increased gradient clipping threshold

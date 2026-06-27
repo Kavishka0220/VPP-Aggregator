@@ -121,7 +121,7 @@ def main():
         "MlpPolicy", 
         env, 
         verbose=1,
-        learning_rate=linear_schedule(1e-4),  # Reduced initial LR for stability
+        learning_rate=linear_schedule(3e-4),  # Reduced initial LR for stability
         gamma=0.995,                 # Balanced discount factor
         gae_lambda=0.95,            # Stronger GAE smoothing for stability
         clip_range=0.2,             # Increased clip range to reduce instability
@@ -165,7 +165,7 @@ def main():
     callbacks = CallbackList([checkpoint_callback, eval_callback])
     
     # 4. Start Training
-    total_timesteps = 1000_000  # Updated to 500k steps for stable convergence
+    total_timesteps = 500_000  # Updated to 500k steps for stable convergence
     print("[START] PPO Training...")
     print(f"   Target: {total_timesteps:,} Timesteps")
     print(f"   Checkpoints every: {checkpoint_callback.save_freq:,} steps")

@@ -63,11 +63,12 @@ def get_controlled_voltages(scenario_name=SCENARIO, num_steps=96):
     
     # Load BESS power data from RL results
     results_dir = Path(parent_dir) / "results_plots" / scenario_name
-    bess_file = results_dir / "detailed_simulation_results.csv"
-    
+    _suffix = f"_{scenario_name}" if scenario_name else ""
+    bess_file = results_dir / f"detailed_simulation_results{_suffix}.csv"
+
     if not bess_file.exists():
         print(f"❌ BESS data file not found: {bess_file}")
-        print(f"   Please run the RL agent first to generate: detailed_simulation_results.csv")
+        print(f"   Please run the RL agent first to generate: detailed_simulation_results{_suffix}.csv")
         return None
     
     print(f"\n{'='*70}")

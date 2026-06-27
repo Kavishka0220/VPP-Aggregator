@@ -816,7 +816,7 @@ class UrbanVPPEnv(gym.Env):
 
 
             # ── UPDATE SOC ────────────────────────────────────────────────
-            eff = 0.95
+            eff = 0.90
             if final_power >= 0:
                 self.soc[i] -= (final_power * 0.25) / eff / cap
             else:

@@ -40,7 +40,7 @@ def main():
 
     # Set to a scenario name (e.g., "cloudy_day") to train on that specific scenario.
     # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
-    scenario_name = "daytime_peak"  # Change to any scenario above
+    scenario_name = "Forecast_21_2024_12_14"  # Change to any scenario above
 
 
     # Get script directory to ensure outputs save in RL_agent folder

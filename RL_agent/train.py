@@ -40,7 +40,7 @@ def main():
 
     # Set to a scenario name (e.g., "cloudy_day") to train on that specific scenario.
     # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
-    scenario_name = "Forecast_21_2024_12_14"  # Change to any scenario above
+    scenario_name = "Forecast_21_2024_12_11"  # Change to any scenario above
 
 
     # Get script directory to ensure outputs save in RL_agent folder
@@ -114,21 +114,21 @@ def main():
 
     # 2. Define the PPO Model with improved stability
     policy_kwargs = dict(
-        net_arch=dict(pi=[512, 512], vf=[512, 512])  # Larger network for better expressiveness
+        net_arch=dict(pi=[256, 256], vf=[256, 256])  # Larger network for better expressiveness
     )
     
     model = PPO(
         "MlpPolicy", 
         env, 
         verbose=1,
-        learning_rate=linear_schedule(1e-4),  # Reduced initial LR for stability
+        learning_rate=linear_schedule(3e-4),  # Reduced initial LR for stability
         gamma=0.995,                 # Balanced discount factor
         gae_lambda=0.95,            # Stronger GAE smoothing for stability
         clip_range=0.2,             # Increased clip range to reduce instability
         clip_range_vf=0.2,          # Value function clipping
         n_epochs=10,                # More epochs for better convergence
-        n_steps=2048,               # Reduced from 2048: smaller rollout buffer saves RAM
-        batch_size=64,             # Larger batches → smoother per-step KL, fewer early stops
+        n_steps=1024,               # Reduced from 2048: smaller rollout buffer saves RAM
+        batch_size=128,             # Larger batches → smoother per-step KL, fewer early stops
         ent_coef=0.005,             # Lower exploration for smoother convergence
         vf_coef=0.5,                # Value function coefficient
         max_grad_norm=0.5,          # Increased gradient clipping threshold

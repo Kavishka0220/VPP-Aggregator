@@ -110,14 +110,25 @@ def get_controlled_voltages(scenario_name=SCENARIO, num_steps=96):
             loads = load_data.iloc[step, :21].values.astype(float)
         
         # Extract solar (11 nodes with PV)
-        # Similar handling for solar data format
         solar_indices = [3, 5, 7, 10, 11, 13, 15, 17, 18, 19, 20]
+        solar_panel_kw_peak = {3: 5.0, 5: 5.0, 7: 5.0, 10: 5.0, 11: 5.0,
+                               13: 5.0, 15: 6.0, 17: 5.0, 18: 5.0, 19: 5.0, 20: 15.0}
         pv_dict = {}
-        solar_col_offset = 1 if solar_data.shape[1] == 22 else 0
-        for pv_idx in solar_indices:
-            col_idx = pv_idx + solar_col_offset
-            if col_idx < len(solar_data.columns):
-                pv_dict[pv_idx] = solar_data.iloc[step, col_idx]
+
+        first_val = str(solar_data.iloc[0, 0])
+        has_ts = not first_val.replace('.', '', 1).lstrip('-').isdigit()
+        solar_col_offset = 1 if has_ts else 0
+        n_data_cols = solar_data.shape[1] - solar_col_offset
+
+        if n_data_cols == 1:
+            irradiance = float(solar_data.iloc[step, solar_col_offset])
+            for pv_idx in solar_indices:
+                pv_dict[pv_idx] = irradiance / 1000.0 * solar_panel_kw_peak[pv_idx]
+        else:
+            for pv_idx in solar_indices:
+                col_idx = pv_idx + solar_col_offset
+                if col_idx < solar_data.shape[1]:
+                    pv_dict[pv_idx] = float(solar_data.iloc[step, col_idx])
         
         # WITH CONTROL: Get BESS power from RL results
         bess_power = bess_data.iloc[step]['BESS_Power_kW']  # Can be + (discharge) or - (charge)

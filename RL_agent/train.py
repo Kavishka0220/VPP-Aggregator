@@ -36,11 +36,11 @@ def main():
     #   "Next_Day_Forecast_21_nodes" : Load dip 00:00-02:00 (21-node version)
     #   "night_peak"               : Extra evening/night load bump
     #   "solar_unavailable_day"    : Solar set to 0 all day
-    #   "Forecast_21_2024_12_17"
+    #   "Forecast_21_2024_12_1x" : Forecast scenarios for December 2024 (21-node version)
 
     # Set to a scenario name (e.g., "cloudy_day") to train on that specific scenario.
     # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
-    scenario_name = "Forecast_21_2024_12_11"  # Change to any scenario above
+    scenario_name = "Forecast_21_2024_12_16"  # Change to any scenario above
 
 
     # Get script directory to ensure outputs save in RL_agent folder

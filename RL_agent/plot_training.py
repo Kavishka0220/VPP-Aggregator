@@ -193,7 +193,7 @@ def plot_multiple_runs(base_dir='./tensorboard_logs', output_dir='./results_plot
     #plt.savefig(output_file_pdf, format='pdf', bbox_inches='tight')
     print(f"[OK] Saved comparison plot to '{output_file_pdf}'")
     
-    plt.show()
+    #plt.show()
 
 
 def main():

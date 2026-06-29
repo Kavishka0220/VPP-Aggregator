@@ -40,7 +40,7 @@ def main():
 
     # Set to a scenario name (e.g., "cloudy_day") to train on that specific scenario.
     # Set to None to use the default 'load_forecast.csv' and 'solar_forecast_formatted.csv'
-    scenario_name = "Forecast_21_2024_12_11"  # Change to any scenario above
+    scenario_name = "Forecast_21_2024_12_13"  # Change to any scenario above
 
 
     # Get script directory to ensure outputs save in RL_agent folder
@@ -127,7 +127,7 @@ def main():
         clip_range=0.2,             # Increased clip range to reduce instability
         clip_range_vf=0.2,          # Value function clipping
         n_epochs=10,                # More epochs for better convergence
-        n_steps=1024,               # Reduced from 2048: smaller rollout buffer saves RAM
+        n_steps=2048,               # Larger rollout → more episodes averaged → smoother ep_rew_mean
         batch_size=128,             # Larger batches → smoother per-step KL, fewer early stops
         ent_coef=0.005,             # Lower exploration for smoother convergence
         vf_coef=0.5,                # Value function coefficient

@@ -107,12 +107,10 @@ class UrbanVPPEnv(gym.Env):
     R_DAYTIME_TOPUP_BONUS    = 8.0     # per kW of pre-peak top-up grid charging
 
     # Smooth ramp  (REDESIGNED)
-    R_SMOOTH_RAMP_REWARD     = 1.5     # per kW *below* ramp threshold (positive signal)
-    R_RAMP_PENALTY_SOFT      = -0.5    # per kW between 0 and 2× threshold
-    R_RAMP_PENALTY_HARD      = -2.0    # per kW above 2× threshold (oscillation)
-    R_BESS_SMOOTH_THRESHOLD  = 5.0     # kW; BESS ramp below this earns bonus
-    R_HOME_SMOOTH_THRESHOLD  = 2.0     # kW; home-battery ramp below this earns bonus
-    R_DIRECTION_BONUS        = 0.5     # per step of sustained same-direction operation
+    R_RAMP_PENALTY_HARD      = -3.0    # per kW of direct charge↔discharge reversal
+    R_BESS_SMOOTH_THRESHOLD  = 5.0     # kW; kept for reference (ramp hard max = this)
+    R_HOME_SMOOTH_THRESHOLD  = 2.0     # kW; kept for reference
+    R_DIRECTION_BONUS        = 1.0     # per step of sustained same-direction operation
 
     # Grid smoothing
     R_RAMP_THRESHOLD         = 5.0     # kW change before grid-ramp penalty kicks in
@@ -877,39 +875,35 @@ class UrbanVPPEnv(gym.Env):
 
     def _compute_ramp_reward(self, final_powers, prev_powers):
         """
-        Smooth-ramp reward component.
+        Direction-consistency reward.
 
-        For each storage unit:
-        • Bonus  if |Δpower| < smooth threshold (RL is rewarded for being smooth).
-        • Soft penalty if threshold < |Δpower| < 2× threshold.
-        • Hard penalty if |Δpower| > 2× threshold (oscillation / chatter).
-        • Direction bonus: sustained same direction → small additional bonus.
+        Ramp rate (bess_ramp_peak / bess_ramp_offpeak) is already enforced as a
+        hard MAXIMUM by physics (np.clip in _apply_physics_constraints).  Any step
+        change within that ceiling is physically valid — the reward must NOT add an
+        extra bonus for smaller changes (that would incentivise the agent to stay
+        near zero rather than ramping smoothly).
 
-        Returns scalar reward contribution (unnormalised).
+        Instead the reward focuses solely on:
+        • Penalising direction reversals (charge→discharge or vice versa) which
+          cause the sawtooth oscillation seen in operation plots.
+        • Rewarding sustained same-direction operation (streak bonus).
         """
         ramp_reward = 0.0
         for i in range(self.n_storage_units):
-            is_bess   = (self.storage_map[i] == self.bess_index)
-            threshold = self.R_BESS_SMOOTH_THRESHOLD if is_bess else self.R_HOME_SMOOTH_THRESHOLD
-            delta     = abs(final_powers[i] - prev_powers[i])
+            cur_dir  = np.sign(final_powers[i])
+            prev_dir = self._prev_direction[i]
 
-            if delta < threshold:
-                ramp_reward += self.R_SMOOTH_RAMP_REWARD * (threshold - delta)
-            elif delta < 2.0 * threshold:
-                excess = delta - threshold
-                ramp_reward += self.R_RAMP_PENALTY_SOFT * excess
-            else:
-                excess = delta - 2.0 * threshold
-                ramp_reward += self.R_RAMP_PENALTY_SOFT * threshold
-                ramp_reward += self.R_RAMP_PENALTY_HARD * excess
-
-            # Direction streak
-            cur_dir = np.sign(final_powers[i])
-            if cur_dir != 0 and cur_dir == self._prev_direction[i]:
+            if cur_dir != 0 and prev_dir != 0 and cur_dir != prev_dir:
+                # Direct charge↔discharge reversal — penalise by power magnitude
+                ramp_reward += self.R_RAMP_PENALTY_HARD * abs(final_powers[i])
+                self._direction_streak[i] = 0
+            elif cur_dir != 0 and cur_dir == prev_dir:
+                # Sustained operation in the same direction
                 self._direction_streak[i] = min(self._direction_streak[i] + 1, 12)
                 ramp_reward += self.R_DIRECTION_BONUS * self._direction_streak[i]
             else:
                 self._direction_streak[i] = 0
+
             self._prev_direction[i] = cur_dir
 
         return ramp_reward
